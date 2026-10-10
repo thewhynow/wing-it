@@ -1,3 +1,8 @@
+# TO BUILD
+# cmake --build build -j
+# ./build/wing-it
+
+
 cmake_minimum_required(VERSION 3.20)
 project(wing_it LANGUAGES C CXX)
 
