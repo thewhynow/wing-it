@@ -1,3 +1,4 @@
+#include <functional>
 #include <implot.h>
 #include <raylib.h>
 #include <rlImGui.h>
@@ -16,7 +17,6 @@ int main() {
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));
-    std::thread keyThread(key_thread, std::ref(*appState), std::ref(*uiState), std::ref(threadRunning));
 
     ImGuiIO& io = ImGui::GetIO();
     SetExitKey(KEY_NULL);
@@ -29,12 +29,12 @@ int main() {
     ImPlot::CreateContext();
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
+        key_loop(*appState, *uiState);
         render_loop(*appState, *uiState);
     }
 
     threadRunning = false;
     timerThread.join();
-    keyThread.join();
 
     ImPlot::DestroyContext();
     rlImGuiShutdown();
