@@ -1,0 +1,14 @@
+# Target labels
+ tinyobjloader-populate
+# Source files and their labels
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/CMakeFiles/tinyobjloader-populate
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/CMakeFiles/tinyobjloader-populate.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/CMakeFiles/tinyobjloader-populate-complete.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-build.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-configure.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-download.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-install.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-mkdir.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-patch.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-test.rule
+/Users/suryamuralireddy/Documents/Code_Projects/HackPHS2026/build/_deps/tinyobjloader-subbuild/tinyobjloader-populate-prefix/src/tinyobjloader-populate-stamp/tinyobjloader-populate-update.rule
