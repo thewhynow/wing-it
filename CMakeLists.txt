@@ -15,6 +15,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 # Dependencies
 # ---------------------------------------------------------------------------
 include(FetchContent)
+set(FETCHCONTENT_QUIET OFF)
 
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
@@ -22,27 +23,33 @@ set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(raylib
   GIT_REPOSITORY https://github.com/raysan5/raylib.git
   GIT_TAG        5.5
-  GIT_SHALLOW    TRUE)
+  GIT_SHALLOW    TRUE
+  GIT_PROGRESS    TRUE)
 FetchContent_Declare(glm
   GIT_REPOSITORY https://github.com/g-truc/glm.git
   GIT_TAG        1.0.1
-  GIT_SHALLOW    TRUE)
+  GIT_SHALLOW    TRUE
+  GIT_PROGRESS    TRUE)
 # No usable CMake projects in these - fetch sources only.
 FetchContent_Declare(imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
   GIT_TAG        v1.91.9
-  GIT_SHALLOW    TRUE)
+  GIT_SHALLOW    TRUE
+  GIT_PROGRESS    TRUE)
 FetchContent_Declare(implot
   GIT_REPOSITORY https://github.com/epezent/implot.git
-  GIT_TAG        851cdbdd60d1dfb64c23e987969694de0f547a6b)
+  GIT_TAG        851cdbdd60d1dfb64c23e987969694de0f547a6b
+  GIT_PROGRESS    TRUE)
 FetchContent_Declare(rlimgui   # raylib <-> ImGui backend
   GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
-  GIT_TAG        1550009359ad975927f7f0e4a3f47e3f27123ea9)
+  GIT_TAG        1550009359ad975927f7f0e4a3f47e3f27123ea9
+  GIT_PROGRESS    TRUE)
 FetchContent_Declare(tinyobjloader
   GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
   GIT_TAG        v2.0.0rc13
   GIT_SHALLOW    TRUE
-  SOURCE_SUBDIR  _none)
+  SOURCE_SUBDIR  _none
+  GIT_PROGRESS    TRUE)
 
 FetchContent_MakeAvailable(raylib glm imgui implot rlimgui tinyobjloader)
 
