@@ -35,7 +35,7 @@ FetchContent_Declare(glm
 # No usable CMake projects in these - fetch sources only.
 FetchContent_Declare(imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
-  GIT_TAG        v1.91.9
+  GIT_TAG        v1.92.9
   GIT_SHALLOW    TRUE)
 FetchContent_Declare(implot
   GIT_REPOSITORY https://github.com/epezent/implot.git
