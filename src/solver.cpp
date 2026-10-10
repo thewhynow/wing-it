@@ -6,7 +6,6 @@ constexpr float cy[19] = { 0, 0, 0, 1, -1, 0, 0, 1, -1, -1, -1, 0, 0, 0, 0, 1, 1
 constexpr float cz[19] = { 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0, 1, -1, 1, -1, 1, -1, 1, -1 };
 constexpr float weight[19]  = { 1.f/3.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f };
 constexpr int opp[19] = { 0, 2, 1, 4, 3, 6, 5, 10, 9, 8, 7, 14, 13, 12, 11, 18, 17, 16, 15 };
-constexpr float ρ_air = 1.225f; // kg/m^3
 std::mutex solverMutex;
 
 std::vector<float> f_in;
@@ -25,7 +24,7 @@ void solverReset(const Grid& grid, const SimParams& params) {
 	size_t totalCells = grid.nx * grid.ny * grid.nz;
 	for (int idx = 0; idx < totalCells; idx++) {
 		for (int i = 0; i < 19; i++) {
-			float cu = cx[idx] * u + cy[idx] * v + cz[idx] * w;
+			float cu = cx[i] * u + cy[i] * v + cz[i] * w;
 			float feq = weight[i] * rho * (1.f + 3.f * cu + 4.5f * cu * cu - 1.5f * u_sq);
 
 			int mem_idx = idx * 19 + i;
@@ -78,8 +77,8 @@ void solverStep(const Grid& grid, const SimParams& params) {
 
 					if (xn < 0 || xn >= grid.nx) continue;
 
-					int yn = y + (int)cy[i] + grid.ny % grid.ny;
-					int zn = z + (int)cz[i] + grid.nz % grid.nz;
+					int yn = (y + (int)cy[i] + grid.ny) % grid.ny;
+					int zn = (z + (int)cz[i] + grid.nz) % grid.nz;
 					size_t neighbor_idx = (zn * grid.ny + yn) * grid.nx + xn;
 					if (grid.solid[neighbor_idx]) {
 						f_out[idx * 19 + opp[i]] = f_post[i];
@@ -136,8 +135,8 @@ Forces solverForces(const Grid& grid, const SimParams& params) {
 
 						if (xn < 0 || xn >= grid.nx) continue;
 
-						int yn = y + (int)cy[i] + grid.ny % grid.ny;
-						int zn = z + (int)cz[i] + grid.nz % grid.nz;
+						int yn = (y + (int)cy[i] + grid.ny) % grid.ny;
+						int zn = (z + (int)cz[i] + grid.nz) % grid.nz;
 						size_t neighbor_idx = (zn * grid.ny + yn) * grid.nx + xn;
 						if (grid.solid[neighbor_idx]) {
 							float f_to = f_in[idx * 19 + i];
@@ -152,9 +151,9 @@ Forces solverForces(const Grid& grid, const SimParams& params) {
 
 	float frontalArea = calculateFrontalArea(grid);
 
-	float cd = (2 * F.x) / (ρ_air * params.inletU * params.inletU * frontalArea);
-	float cl = (2 * F.y) / (ρ_air * params.inletU * params.inletU * frontalArea);
-	float cz = (2 * F.z) / (ρ_air * params.inletU * params.inletU * frontalArea);
+	float cd = (2 * F.x) / (1.0f * params.inletU * params.inletU * frontalArea);
+	float cl = (2 * F.y) / (1.0f * params.inletU * params.inletU * frontalArea);
+	float cz = (2 * F.z) / (1.0f * params.inletU * params.inletU * frontalArea);
 
 	return Forces{F, cd, cl, cz, frontalArea};
 };
