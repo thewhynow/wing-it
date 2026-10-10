@@ -106,6 +106,22 @@ void solverStep(const Grid& grid, const SimParams& params) {
 	std::swap(f_in, f_out);
 };
 
+float calculateFrontalArea(const Grid& grid) {
+	float area = 0.f;
+	for (int z = 0; z < grid.nz; z++) {
+		for (int y = 0; y < grid.ny; y++) {
+			for (int x = 0; x < grid.nx; x++) {
+				int idx = (z * grid.ny + y) * grid.nx + x;
+				if (grid.solid[idx]) {
+					area += 1.f;
+					break;
+				}
+			}
+		}
+	}
+	return area;
+};
+
 Forces solverForces(const Grid& grid, const SimParams& params) { 
 	glm::vec3 F(0.f);
 	for (int z = 0; z < grid.nz; z++) {
