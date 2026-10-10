@@ -10,7 +10,7 @@ struct FlowField {
 
     size_t cellIndex(Grid &g, size_t x, size_t y, size_t z) const;
 };              // per cell
-struct Forces    { glm::vec3 F; float cd, cl, frontalArea; };
+struct Forces    { glm::vec3 F; float cd, cl, cz, frontalArea; };
 struct SimParams { float inletU = 0.05f, tau = 0.55f; float aoaDeg = 0; };
 struct TriMesh   {
     std::vector<glm::vec3> vertices;
