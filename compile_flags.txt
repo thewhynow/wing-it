@@ -1,0 +1,12 @@
+-std=c++17
+-xc++
+-Iinc
+-Ibuild/_deps/raylib-src/src
+-Ibuild/_deps/glm-src
+-Ibuild/_deps/imgui-src
+-Ibuild/_deps/implot-src
+-Ibuild/_deps/rlimgui-src
+-Ibuild/_deps/tinyobjloader-src
+-I/opt/homebrew/opt/libomp/include
+-DNO_FONT_AWESOME
+-fopenmp

@@ -1,9 +1,14 @@
+# TO BUILD
+# cmake --build build -j
+# ./build/wing-it
+
+
 cmake_minimum_required(VERSION 3.20)
 project(wing_it LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS OFF)  # clangd uses compile_flags.txt instead
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -33,7 +38,7 @@ FetchContent_Declare(glm
 # No usable CMake projects in these - fetch sources only.
 FetchContent_Declare(imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
-  GIT_TAG        v1.91.9
+  GIT_TAG        v1.92.9
   GIT_SHALLOW    TRUE
   GIT_PROGRESS    TRUE)
 FetchContent_Declare(implot
