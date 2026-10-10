@@ -108,3 +108,4 @@ void solverStep(const Grid& grid, const SimParams& params) {
 Forces solverForces() { return Forces{}; };
 
 void   solverSnapshot(FlowField& out) {};
+

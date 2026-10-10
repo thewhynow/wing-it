@@ -4,7 +4,7 @@
 #include "ui.hpp"
 #include "render.hpp"
 
-void camera_loop(AppState& appState, CameraState& cameraState) {
+void camera_loop(AppState& appState, Render3DState& cameraState) {
     // --- update (before drawing) ---
     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
         Vector2 d = GetMouseDelta();
@@ -21,14 +21,19 @@ void camera_loop(AppState& appState, CameraState& cameraState) {
         cameraState.dist * cosf(cameraState.pitch) * cosf(cameraState.yaw)
     };
 
+    DrawCircleV(GetMousePosition(), 5, DARKBLUE);
+}
+
+void voxel_loop(AppState& appState, const Render3DState& cameraState) {
+    static int currentZIndex = 0;
+    // currentZIndex++;
+    // currentZIndex %= 1;
+
     BeginMode3D(cameraState.camera);
 
-    DrawCube((Vector3){0.0f, 0.0f, 0.0f}, 2.0f, 2.0f, 2.0f, RED);
-    DrawCubeWires((Vector3){0.0f, 0.0f, 0.0f}, 2.0f, 2.0f, 2.0f, MAROON);
+    for (const auto& coord : cameraState.coords[currentZIndex]) {
+        DrawSphere(Vector3(coord.x, coord.y, currentZIndex), 0.01, RED);
+    }
 
     EndMode3D();
-
-
-    DrawCircleV(GetMousePosition(), 5, DARKBLUE);
-
 }

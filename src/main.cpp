@@ -11,10 +11,9 @@ ImFont* bodyFont = nullptr;
 int main() {
     const auto appState = new AppState;
     const auto uiState = new UiState;
-    const auto cameraState = new CameraState;
+    const auto cameraState = new Render3DState;
 
-    //InitWindow(appState->window.width, appState->window.height, "Hello, World!");
-    InitWindow(799, 450, "raylib [core] example - 3d mode");
+    InitWindow(appState->window.width, appState->window.height, "kill me :)");
     rlImGuiSetup(true);
 
     std::atomic<bool> threadRunning{true};
@@ -29,12 +28,24 @@ int main() {
     }
 
     ImPlot::CreateContext();
+    printf("got here!");
+    // we need to start by creating a vertex at the middle of every element
+    std::vector<Vector2> morecoords;
+    morecoords.reserve(cameraState->grid.nx * cameraState->grid.ny);
+    for (int x = 0; x < cameraState->grid.nx; x++) {
+        for (int y = 0; y < cameraState->grid.ny; y++) {
+            morecoords.push_back(Vector2(x, y));
+        }
+    }
+    cameraState->coords.push_back(morecoords);
+    printf("got here!");
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
         BeginDrawing();
         ClearBackground(BLACK);
         key_loop(*appState, *uiState);
         camera_loop(*appState, *cameraState);
+        voxel_loop(*appState, *cameraState);
         ui_loop(*appState, *uiState);
         EndDrawing();
     }

@@ -103,7 +103,8 @@ if(NOT APP_SOURCES)
 endif()
 
 add_executable(wing_it ${APP_SOURCES}
-  ${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc)  # defines TINYOBJLOADER_IMPLEMENTATION - do not define it in src/
+  ${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc
+        src/common.cpp)  # defines TINYOBJLOADER_IMPLEMENTATION - do not define it in src/
 target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR})
 target_link_libraries(wing_it PRIVATE raylib imgui_lib glm::glm Threads::Threads)
 if(OpenMP_CXX_FOUND)
