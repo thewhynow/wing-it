@@ -36,4 +36,4 @@ struct UiState {
 
 void render_loop(AppState& appState, UiState& uiState);
 void time_thread(AppState& appState, std::atomic<bool>& running);
-void key_thread(AppState& appState, UiState& uiState, std::atomic<bool>& running);
+void key_loop(AppState& appState, UiState& uiState);
