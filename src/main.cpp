@@ -3,30 +3,19 @@
 #include <raylib.h>
 #include <rlImGui.h>
 #include <thread>
-
+#include "render.hpp"
 #include "ui.hpp"
 
 ImFont* bodyFont = nullptr;
 
 int main() {
-
-
     const auto appState = new AppState;
     const auto uiState = new UiState;
+    const auto cameraState = new CameraState;
 
     InitWindow(appState->window.width, appState->window.height, "Hello, World!");
     rlImGuiSetup(true);
     InitWindow(799, 450, "raylib [core] example - 3d mode");
-
-    Camera3D camera = { 0 };
-    camera.position = (Vector3){ 0.0f, 10.0f, 10.0f };
-    camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
-    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-    camera.fovy = 45.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
-
-    SetTargetFPS(60);
-
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));
@@ -42,9 +31,12 @@ int main() {
     ImPlot::CreateContext();
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
+        BeginDrawing();
+        ClearBackground(BLACK);
         key_loop(*appState, *uiState);
-        create3d(camera);
-        render_loop(*appState, *uiState);
+        camera_loop(*appState, *cameraState);
+        ui_loop(*appState, *uiState);
+        EndDrawing();
     }
 
     threadRunning = false;

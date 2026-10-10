@@ -36,9 +36,9 @@ void key_loop(AppState& appState, UiState& uiState) {
     }
 }
 
-void render_loop(AppState& appState, UiState& uiState) {
+void ui_loop(AppState& appState, UiState& uiState) {
     appState.frameRate = GetFPS();
-    BeginDrawing();
+
 
     rlImGuiBegin();
 
@@ -74,5 +74,5 @@ void render_loop(AppState& appState, UiState& uiState) {
     ImGui::End();
 
     rlImGuiEnd();
-    EndDrawing();
+
 }
