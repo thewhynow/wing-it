@@ -178,8 +178,85 @@ float scaleToFit(const TriMesh &mesh, const Grid &g){
     return s;
 }
 
-void voxelize(const TriMesh& mesh, Grid& grid);
-float frontalArea(const Grid& grid);
+void voxelize(const TriMesh& mesh, Grid& grid){
+    grid.solid.assign(grid.nx * grid.ny * grid.nz, 0);
+
+    std::vector<std::vector<float>> hits ((size_t) grid.ny * grid.nz);
+
+    /**
+     * iterate through the triangles,
+     * for every triangle, creating a bounding box in the YZ plane
+     * see which columns that it intersects
+     */
+
+    for (size_t t = 0; t < mesh.indices.size(); t += 3){
+        glm::vec3 a = mesh.vertices[mesh.indices[t]],
+                  b = mesh.vertices[mesh.indices[t + 1]],
+                  c = mesh.vertices[mesh.indices[t + 2]]
+        ;
+
+        float ymin = std::min({a.y, b.y, c.y}),
+              yhigh = std::max({a.y, b.y, c.y}),
+              zmin = std::min({a.z, b.z, c.z}),
+              zhigh = std::max({a.z, b.z, c.z})
+        ;
+
+        /* ray sits at middle of voxel, but the bounding box is at edges */
+
+        int j0 = std::max(0,      (int)std::ceil (ymin - 0.5f));
+        int j1 = std::min(grid.ny - 1, (int)std::floor(yhigh - 0.5f));
+        int k0 = std::max(0,      (int)std::ceil (zmin - 0.5f));
+        int k1 = std::min(grid.nz - 1, (int)std::floor(zhigh - 0.5f));
+
+        /* barycentric coordinates to test if points are inside triangle */
+
+        float d = (b.y - a.y) * (c.z - a.z) - (c.y - a.y) * (b.z - a.z);
+
+        if (std::abs(d) < 1e-12) continue; /* edge-on to the ray, can't be hit */
+
+        for (int k = k0; k < k1; ++k){
+            for (int j = j0; j < j1; ++j){
+                /* point within the bounding box that we are testing */
+                float py = j + 0.5f + 1e-4f;
+                float pz = k + 0.5f + 1.7e-4f;
+
+                float wA = ((b.y - py) * (c.z - pz) - (c.y - py) * (b.z - pz)) / d,
+                      wB = ((c.y - py) * (a.z - pz) - (a.y - py) * (c.z - pz)) / d
+                ;
+                float wC = 1.0f - wA - wB;
+
+                if (wA < 0.f && wB < 0.f && wC < 0.f)
+                    continue; /* ray missed */
+
+                float x = wA * a.x + wB * b.x + wC * c.x; /* where it hit */
+                hits[j + (size_t)grid.ny * k].push_back(x);
+            }
+        }
+
+        /* now sort the hits */
+
+        for (int k = k0; k < k1; ++k){
+            for (int j = j0; j < j1; ++j){
+                std::vector<float> &h = hits[j + (size_t)grid.ny * k];
+
+                /* empty model or leaky mesh */
+                if (h.empty() || h.size() % 2) continue;
+
+                std::sort(h.begin(), h.end());
+
+                for (size_t p = 0; p + 1 < h.size(); p += 2){
+                    /* range for that point in the YZ plane */
+                    int i0 = std::max(0, (int)std::ceil(h[p] - 0.5f));
+                    int i1 = std::min(grid.nx - 1, (int)std::ceil(h[p + 1] - 0.5f) - 1);
+
+                    for (int i = i0; i <= i1; ++i)
+                        grid.solid[i + (size_t)grid.nx * (j + (size_t)grid.ny * k)] = 1;
+                }
+            }
+        }
+    }
+}
+
 TriMesh makeSphere();
 TriMesh makeCube();
 TriMesh makeNacaWing();

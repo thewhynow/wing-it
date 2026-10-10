@@ -12,9 +12,6 @@ void fitToGrid(TriMesh& mesh, const Grid& grid, float aoaDeg, bool zUp);
 /* fill grid.solid: 1 where a cell's center is inside the mesh. mesh must already be fit to the grid */
 void voxelize(const TriMesh& mesh, Grid& grid);
 
-/* solid cells seen looking down +X (projected onto YZ), in cells^2 */
-float frontalArea(const Grid& grid);
-
 /* built-in test shapes, in their own units (run through fitToGrid before use) */
 TriMesh makeSphere();
 TriMesh makeCube();
