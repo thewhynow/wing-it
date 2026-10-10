@@ -13,9 +13,9 @@ int main() {
     const auto uiState = new UiState;
     const auto cameraState = new CameraState;
 
-    InitWindow(appState->window.width, appState->window.height, "Hello, World!");
-    rlImGuiSetup(true);
+    //InitWindow(appState->window.width, appState->window.height, "Hello, World!");
     InitWindow(799, 450, "raylib [core] example - 3d mode");
+    rlImGuiSetup(true);
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));

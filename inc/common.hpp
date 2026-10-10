@@ -5,7 +5,11 @@
 #include <glm/glm.hpp>
 
 struct Grid      { int nx, ny, nz; std::vector<uint8_t> solid; };      // 1 = obstacle
-struct FlowField { std::vector<float> ux, uy, uz, rho; };              // per cell
+struct FlowField {
+    std::vector<float> ux, uy, uz, rho;
+
+    size_t cellIndex(Grid &g, size_t x, size_t y, size_t z) const;
+};              // per cell
 struct Forces    { glm::vec3 F; float cd, cl, cz, frontalArea; };
 struct SimParams { float inletU = 0.05f, tau = 0.55f; float aoaDeg = 0; };
 struct TriMesh   {
