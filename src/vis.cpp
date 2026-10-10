@@ -2,23 +2,11 @@
 #include "raymath.h"
 #include <math.h>
 
-int create3d(void) {
-    InitWindow(800, 450, "raylib [core] example - 3d mode");
-
-    Camera3D camera = { 0 };
-    camera.position = (Vector3){ 0.0f, 10.0f, 10.0f };
-    camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };    
-    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };   
-    camera.fovy = 45.0f;    
-    camera.projection = CAMERA_PERSPECTIVE;
-
-    SetTargetFPS(60);
-
+int create3d(Camera camera) {
+    
     float dist = 14.14f;
     float yaw = 0.0f;
     float pitch = PI / 4.0f;
-
-    while (!WindowShouldClose()) {
 
          // --- update (before drawing) ---
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
@@ -49,8 +37,6 @@ int create3d(void) {
         EndDrawing();
 
         DrawCircleV(GetMousePosition(), 5, DARKBLUE);
-    }
 
-    CloseWindow();
     return 0;
 }

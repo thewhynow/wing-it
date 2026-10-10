@@ -1,3 +1,3 @@
 #pragma once
 
-int create3d(void);
+int create3d(Camera camera);

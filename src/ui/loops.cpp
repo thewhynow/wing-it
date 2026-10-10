@@ -42,7 +42,6 @@ void key_thread(AppState& appState, UiState& uiState, std::atomic<bool>& running
 void render_loop(AppState& appState, UiState& uiState) {
     appState.frameRate = GetFPS();
     BeginDrawing();
-    ClearBackground(BLACK);
 
     rlImGuiBegin();
 
