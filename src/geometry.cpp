@@ -110,19 +110,18 @@ void fixUpAxis(TriMesh &mesh, bool zUp){
 }
 
 void fitToGrid(TriMesh& mesh, const Grid& grid, float aoaDeg, bool zUp){
+    fixUpAxis(mesh, zUp);
+
     glm::vec3 low, hi;
     boundingBox(mesh, low, hi);
-
-    for (const auto &vert : mesh.vertices){
-        low = glm::min(low, vert);
-        hi = glm::max(hi, vert);
-    }
 
     glm::vec3 center = (low + hi) / 2.0f;
 
     for (auto &vert : mesh.vertices)
          vert -= center;
     
+    applyAoA(mesh, aoaDeg);
+
     float s = scaleToFit(mesh, grid);
 
     glm::vec3 target {
@@ -159,7 +158,7 @@ float scaleToFit(const TriMesh &mesh, const Grid &g){
     glm::vec3 low, high;
     boundingBox(mesh, low, high);
 
-    glm::vec3 extent = glm::max(high - low, glm::vec3{-1e30f}); /* avoid / 0 on flat meshes ... */
+    glm::vec3 extent = glm::max(high - low, glm::vec3{1e-6f}); /* avoid / 0 on flat meshes ... */
 
     /**
      * take the min of three ratios (making the model fit on x, y, or z axis)
