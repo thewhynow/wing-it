@@ -1,22 +1,11 @@
 #include "geometry.hpp"
 #include <tiny_obj_loader.h>
-#include <print>
 
 bool loadMesh(const std::string& path, TriMesh& out){
     tinyobj::ObjReaderConfig config;
     config.mtl_search_path = "./";
     config.triangulate = true;
     tinyobj::ObjReader reader;
-
-    if (!reader.ParseFromFile(path)){
-        if (!reader.Error().empty())
-            std::println("{}", reader.Error());
-
-        return false;
-    }
-
-    if (!reader.Warning().empty())
-        std::println("{}", reader.Warning());
 
     auto &attrib = reader.GetAttrib();
     auto &shapes = reader.GetShapes();

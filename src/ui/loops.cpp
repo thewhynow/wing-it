@@ -26,23 +26,19 @@ void time_thread(AppState& appState, std::atomic<bool>& running) {
     }
 }
 
-void key_thread(AppState& appState, UiState& uiState, std::atomic<bool>& running) {
-    while (running) {
-        if (IsKeyPressed(KEY_A)) {
-            running = false;
-            appState.shouldQuit = true;
-            return;
-        }
-        if (IsKeyPressed(KEY_C)) {
-            uiState.countUp++;
-        }
+void key_loop(AppState& appState, UiState& uiState) {
+    if (IsKeyPressed(KEY_A)) {
+        appState.shouldQuit = true;
+        return;
+    }
+    if (IsKeyDown(KEY_C)) {
+        uiState.countUp++;
     }
 }
 
-void render_loop(AppState& appState, UiState& uiState) {
+void ui_loop(AppState& appState, UiState& uiState) {
     appState.frameRate = GetFPS();
-    BeginDrawing();
-    ClearBackground(BLACK);
+
 
     rlImGuiBegin();
 
@@ -78,5 +74,5 @@ void render_loop(AppState& appState, UiState& uiState) {
     ImGui::End();
 
     rlImGuiEnd();
-    EndDrawing();
+
 }

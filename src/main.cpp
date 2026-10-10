@@ -1,8 +1,9 @@
+#include <functional>
 #include <implot.h>
 #include <raylib.h>
 #include <rlImGui.h>
 #include <thread>
-
+#include "render.hpp"
 #include "ui.hpp"
 
 ImFont* bodyFont = nullptr;
@@ -10,13 +11,14 @@ ImFont* bodyFont = nullptr;
 int main() {
     const auto appState = new AppState;
     const auto uiState = new UiState;
+    const auto cameraState = new CameraState;
 
     InitWindow(appState->window.width, appState->window.height, "Hello, World!");
     rlImGuiSetup(true);
+    InitWindow(799, 450, "raylib [core] example - 3d mode");
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));
-    std::thread keyThread(key_thread, std::ref(*appState), std::ref(*uiState), std::ref(threadRunning));
 
     ImGuiIO& io = ImGui::GetIO();
     SetExitKey(KEY_NULL);
@@ -29,12 +31,16 @@ int main() {
     ImPlot::CreateContext();
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
-        render_loop(*appState, *uiState);
+        BeginDrawing();
+        ClearBackground(BLACK);
+        key_loop(*appState, *uiState);
+        camera_loop(*appState, *cameraState);
+        ui_loop(*appState, *uiState);
+        EndDrawing();
     }
 
     threadRunning = false;
     timerThread.join();
-    keyThread.join();
 
     ImPlot::DestroyContext();
     rlImGuiShutdown();
