@@ -112,3 +112,10 @@ endif()
 if(APPLE)
   target_link_libraries(wing_it PRIVATE "-framework IOKit" "-framework Cocoa" "-framework OpenGL")
 endif()
+
+add_custom_command(TARGET wing_it POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:wing_it>/assets"
+        COMMENT "Copying assets directory to build folder..."
+)
