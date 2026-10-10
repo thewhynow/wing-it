@@ -102,7 +102,9 @@ if(NOT APP_SOURCES)
   return()
 endif()
 
-add_executable(wing_it ${APP_SOURCES})
+add_executable(wing_it ${APP_SOURCES}
+        src/ui/loops.cpp
+)
 target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR})
 target_link_libraries(wing_it PRIVATE raylib imgui_lib glm::glm Threads::Threads)
 if(OpenMP_CXX_FOUND)
@@ -111,3 +113,10 @@ endif()
 if(APPLE)
   target_link_libraries(wing_it PRIVATE "-framework IOKit" "-framework Cocoa" "-framework OpenGL")
 endif()
+
+add_custom_command(TARGET wing_it POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:wing_it>/assets"
+        COMMENT "Copying assets directory to build folder..."
+)
