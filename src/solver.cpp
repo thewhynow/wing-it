@@ -1,4 +1,5 @@
 #include "solver.hpp"
+#include <mutex>
 
 constexpr float cx[19] = { 0, 1, -1, 0, 0, 0, 0, 1, 1, -1, -1, 1, 1, -1, -1, 0, 0, 0, 0 };
 constexpr float cy[19] = { 0, 0, 0, 1, -1, 0, 0, 1, -1, -1, -1, 0, 0, 0, 0, 1, 1, -1, -1 };
@@ -6,6 +7,7 @@ constexpr float cz[19] = { 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0, 1, -1, 1, -1, 1, -1
 constexpr float weight[19]  = { 1.f/3.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/18.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f, 1.f/36.f };
 constexpr int opp[19] = { 0, 2, 1, 4, 3, 6, 5, 10, 9, 8, 7, 14, 13, 12, 11, 18, 17, 16, 15 };
 constexpr float ρ_air = 1.225f; // kg/m^3
+std::mutex solverMutex;
 
 std::vector<float> f_in;
 std::vector<float> f_out;
@@ -157,4 +159,35 @@ Forces solverForces(const Grid& grid, const SimParams& params) {
 	return Forces{F, cd, cl, cz, frontalArea};
 };
 
-void   solverSnapshot(FlowField& out) {};
+void solverSnapshot(FlowField& out) {
+	std::lock_guard<std::mutex> lock(solverMutex);
+
+	size_t totalCells = f_in.size() / 19;
+
+	if (out.rho.size() != totalCells) {
+		out.ux.resize(totalCells);
+		out.uy.resize(totalCells);
+		out.uz.resize(totalCells);
+		out.rho.resize(totalCells);
+	}
+
+	#pragma omp parallel for
+	for (int idx = 0; idx < totalCells; idx++) {
+		float rho = 0.f, u = 0.f, v = 0.f, w = 0.f;
+		for (int i = 0; i < 19; i++) {
+			int mem_idx = idx * 19 + i;
+			rho += f_in[mem_idx];
+			u += f_in[mem_idx] * cx[i];
+			v += f_in[mem_idx] * cy[i];
+			w += f_in[mem_idx] * cz[i];
+		}
+		u /= rho;
+		v /= rho;
+		w /= rho;
+
+		out.rho[idx] = rho;
+		out.ux[idx] = u;
+		out.uy[idx] = v;
+		out.uz[idx] = w;
+	}
+};
