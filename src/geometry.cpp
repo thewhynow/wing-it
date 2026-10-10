@@ -87,7 +87,10 @@ bool loadMesh(const std::string& path, TriMesh& out){
     return true;
 }
 
-void    fitToGrid(TriMesh& mesh, const Grid& grid);
+void fitToGrid(TriMesh& mesh, const Grid& grid){
+
+}
+
 void    applyAoA(TriMesh& mesh, float aoaDeg);
 void    voxelize(const TriMesh& mesh, Grid& grid);
 float   frontalArea(const Grid& grid);
