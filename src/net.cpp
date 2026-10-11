@@ -1,21 +1,62 @@
 #include "net.hpp"
 #include <algorithm>
-#include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
-#include <ifaddrs.h>
-#include <net/if.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include <mutex>
+
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <iphlpapi.h>
+    #include <vector>
+    using ssize_t = int;
+    using nfds_t = ULONG;
+    #ifndef MSG_NOSIGNAL
+        #define MSG_NOSIGNAL 0
+    #endif
+    static int netErr() { return WSAGetLastError(); }
+    static bool errWouldBlock(int e) { return e == WSAEWOULDBLOCK; }
+    static bool errIntr(int e) { return e == WSAEINTR; }
+    static bool errInProgress(int e) { return e == WSAEWOULDBLOCK; }
+    static std::string errStr(int e) {
+        char* m = nullptr;
+        FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                       nullptr, (DWORD)e, 0, (LPSTR)&m, 0, nullptr);
+        std::string r = m ? m : "error " + std::to_string(e);
+        if (m) LocalFree(m);
+        while (!r.empty() && (r.back() == '\n' || r.back() == '\r' || r.back() == ' ')) r.pop_back();
+        return r;
+    }
+    static void closeSock(int fd) { closesocket((SOCKET)fd); }
+    static int pollSock(pollfd* p, nfds_t n, int ms) { return WSAPoll(p, n, ms); }
+    static void setNonBlocking(int fd) { u_long on = 1; ioctlsocket((SOCKET)fd, FIONBIO, &on); }
+    static void netInit() {
+        static std::once_flag f;
+        std::call_once(f, [] { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); });
+    }
+#else
+    #include <arpa/inet.h>
+    #include <fcntl.h>
+    #include <ifaddrs.h>
+    #include <net/if.h>
+    #include <netdb.h>
+    #include <netinet/in.h>
+    #include <netinet/tcp.h>
+    #include <poll.h>
+    #include <sys/socket.h>
+    #include <unistd.h>
+    static int netErr() { return errno; }
+    static bool errWouldBlock(int e) { return e == EAGAIN || e == EWOULDBLOCK; }
+    static bool errIntr(int e) { return e == EINTR; }
+    static bool errInProgress(int e) { return e == EINPROGRESS; }
+    static std::string errStr(int e) { return strerror(e); }
+    static void closeSock(int fd) { ::close(fd); }
+    static int pollSock(pollfd* p, nfds_t n, int ms) { return ::poll(p, n, ms); }
+    static void setNonBlocking(int fd) { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK); }
+    static void netInit() {}
+#endif
 
 static constexpr size_t kMaxLine = 4096;
-
-static void setNonBlocking(int fd) { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK); }
 
 void NetPeer::fail(NetState s, const std::string& why) {
     { std::lock_guard<std::mutex> l(mu); err = why; }
@@ -77,17 +118,20 @@ void NetPeer::join(const std::string& address, int port) {
 }
 
 void NetPeer::runHost(int port, int maxClients) {
+    netInit();
     int ls = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (ls < 0) return fail(NetState::Failed, std::string("socket: ") + strerror(errno));
+    if (ls < 0) return fail(NetState::Failed, std::string("socket: ") + errStr(netErr()));
     int one = 1;
-    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#ifndef _WIN32 // on Windows SO_REUSEADDR lets another process steal the port
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, (const char*)&one, sizeof one);
+#endif
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_ANY);
     a.sin_port = htons((uint16_t)port);
     if (::bind(ls, (sockaddr*)&a, sizeof a) < 0 || ::listen(ls, 8) < 0) {
-        std::string why = std::string("can't listen on port ") + std::to_string(port) + ": " + strerror(errno);
-        ::close(ls);
+        std::string why = std::string("can't listen on port ") + std::to_string(port) + ": " + errStr(netErr());
+        closeSock(ls);
         return fail(NetState::Failed, why);
     }
     setNonBlocking(ls);
@@ -129,8 +173,8 @@ void NetPeer::runHost(int port, int maxClients) {
             pfds.push_back({c.fd, ev, 0});
         }
 
-        int pr = ::poll(pfds.data(), (nfds_t)pfds.size(), 20);
-        if (pr < 0 && errno != EINTR) {
+        int pr = pollSock(pfds.data(), (nfds_t)pfds.size(), 20);
+        if (pr < 0 && !errIntr(netErr())) {
             fail(NetState::Failed, "network error");
             break;
         }
@@ -145,9 +189,9 @@ void NetPeer::runHost(int port, int maxClients) {
                     setNonBlocking(cfd);
                     int flag = 1;
 #ifdef __APPLE__
-                    setsockopt(cfd, SOL_SOCKET, SO_NOSIGPIPE, &flag, sizeof flag);
+                    setsockopt(cfd, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&flag, sizeof flag);
 #endif
-                    setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
+                    setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, (const char*)&flag, sizeof flag);
                     int cid = nextClientId++;
                     clients.push_back({cid, cfd, "", ""});
                     {
@@ -177,7 +221,7 @@ void NetPeer::runHost(int port, int maxClients) {
 #endif
                 if (n > 0) {
                     c.wbuf.erase(0, (size_t)n);
-                } else if (n < 0 && errno != EAGAIN && errno != EINTR) {
+                } else if (n < 0 && !errWouldBlock(netErr()) && !errIntr(netErr())) {
                     deadClientIds.push_back(c.id);
                     continue;
                 }
@@ -186,7 +230,7 @@ void NetPeer::runHost(int port, int maxClients) {
             if (pfd.revents & (POLLIN | POLLHUP | POLLERR)) {
                 ssize_t n = ::recv(c.fd, tmp, sizeof tmp, 0);
                 if (n <= 0) {
-                    if (n == 0 || (errno != EAGAIN && errno != EINTR)) {
+                    if (n == 0 || (!errWouldBlock(netErr()) && !errIntr(netErr()))) {
                         deadClientIds.push_back(c.id);
                         continue;
                     }
@@ -217,7 +261,7 @@ void NetPeer::runHost(int port, int maxClients) {
                     return cc.id == deadId;
                 });
                 if (it != clients.end()) {
-                    ::close(it->fd);
+                    closeSock(it->fd);
                     clients.erase(it);
                     std::lock_guard<std::mutex> l(mu);
                     inbox.push_back({deadId, "__DISCONNECT__"});
@@ -236,45 +280,46 @@ void NetPeer::runHost(int port, int maxClients) {
             ::send(c.fd, c.wbuf.data(), c.wbuf.size(), MSG_NOSIGNAL);
 #endif
         }
-        ::close(c.fd);
+        closeSock(c.fd);
     }
-    ::close(ls);
+    closeSock(ls);
     clients.clear();
     numClients = 0;
 }
 
 void NetPeer::runJoin(std::string address, int port) {
+    netInit();
     addrinfo hints{}, *res = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     int gai = getaddrinfo(address.c_str(), std::to_string(port).c_str(), &hints, &res);
     if (gai != 0 || !res) return fail(NetState::Failed, "bad address '" + address + "'");
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) { freeaddrinfo(res); return fail(NetState::Failed, std::string("socket: ") + strerror(errno)); }
+    if (fd < 0) { freeaddrinfo(res); return fail(NetState::Failed, std::string("socket: ") + errStr(netErr())); }
     setNonBlocking(fd);
     int rc = ::connect(fd, res->ai_addr, res->ai_addrlen);
     freeaddrinfo(res);
-    if (rc < 0 && errno != EINPROGRESS) {
-        std::string why = std::string("connect failed: ") + strerror(errno);
-        ::close(fd);
+    if (rc < 0 && !errInProgress(netErr())) {
+        std::string why = std::string("connect failed: ") + errStr(netErr());
+        closeSock(fd);
         return fail(NetState::Failed, why);
     }
     // wait up to ~6 s in short slices so close() can cancel
     bool ok = rc == 0;
     for (int i = 0; !ok && i < 60 && !stop; i++) {
         pollfd p{fd, POLLOUT, 0};
-        if (::poll(&p, 1, 100) > 0) {
+        if (pollSock(&p, 1, 100) > 0) {
             int e = 0; socklen_t len = sizeof e;
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &len);
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&e, &len);
             if (e != 0) {
-                ::close(fd);
-                return fail(NetState::Failed, std::string("connect failed: ") + strerror(e));
+                closeSock(fd);
+                return fail(NetState::Failed, std::string("connect failed: ") + errStr(e));
             }
             ok = true;
         }
     }
-    if (stop) { ::close(fd); return; }
-    if (!ok) { ::close(fd); return fail(NetState::Failed, "connection timed out"); }
+    if (stop) { closeSock(fd); return; }
+    if (!ok) { closeSock(fd); return fail(NetState::Failed, "connection timed out"); }
     ioLoop(fd);
 }
 
@@ -282,9 +327,9 @@ void NetPeer::ioLoop(int fd) {
     setNonBlocking(fd);
     int one = 1;
 #ifdef __APPLE__
-    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&one, sizeof one);
 #endif
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof one);
     st = NetState::Connected;
     numClients = 1;
 
@@ -301,8 +346,8 @@ void NetPeer::ioLoop(int fd) {
     while (!stop) {
         drainOutbox();
         pollfd p{fd, (short)(POLLIN | (wbuf.empty() ? 0 : POLLOUT)), 0};
-        int pr = ::poll(&p, 1, 20);
-        if (pr < 0 && errno != EINTR) { fail(NetState::Failed, "network error"); break; }
+        int pr = pollSock(&p, 1, 20);
+        if (pr < 0 && !errIntr(netErr())) { fail(NetState::Failed, "network error"); break; }
         if (pr > 0 && (p.revents & POLLOUT)) {
 #ifdef __APPLE__
             ssize_t n = ::send(fd, wbuf.data(), wbuf.size(), 0);
@@ -310,13 +355,13 @@ void NetPeer::ioLoop(int fd) {
             ssize_t n = ::send(fd, wbuf.data(), wbuf.size(), MSG_NOSIGNAL);
 #endif
             if (n > 0) wbuf.erase(0, (size_t)n);
-            else if (n < 0 && errno != EAGAIN && errno != EINTR) { fail(NetState::Failed, "connection lost"); break; }
+            else if (n < 0 && !errWouldBlock(netErr()) && !errIntr(netErr())) { fail(NetState::Failed, "connection lost"); break; }
         }
         if (pr > 0 && (p.revents & (POLLIN | POLLHUP | POLLERR))) {
             ssize_t n = ::recv(fd, tmp, sizeof tmp, 0);
             if (n == 0) { fail(NetState::Closed, "opponent disconnected"); break; }
             if (n < 0) {
-                if (errno != EAGAIN && errno != EINTR) { fail(NetState::Failed, "connection lost"); break; }
+                if (!errWouldBlock(netErr()) && !errIntr(netErr())) { fail(NetState::Failed, "connection lost"); break; }
             } else {
                 rbuf.append(tmp, (size_t)n);
                 std::lock_guard<std::mutex> l(mu);
@@ -340,12 +385,36 @@ void NetPeer::ioLoop(int fd) {
         if (!wbuf.empty()) ::send(fd, wbuf.data(), wbuf.size(), MSG_NOSIGNAL);
 #endif
     }
-    ::close(fd);
+    closeSock(fd);
     numClients = 0;
 }
 
 std::vector<std::string> NetPeer::localAddresses() {
     std::vector<std::string> out;
+#ifdef _WIN32
+    ULONG len = 15000;
+    std::vector<char> buf(len);
+    auto* addrs = (IP_ADAPTER_ADDRESSES*)buf.data();
+    ULONG rc = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER, nullptr, addrs, &len);
+    if (rc == ERROR_BUFFER_OVERFLOW) {
+        buf.resize(len);
+        addrs = (IP_ADAPTER_ADDRESSES*)buf.data();
+        rc = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER, nullptr, addrs, &len);
+    }
+    if (rc != NO_ERROR) return out;
+    for (auto* a = addrs; a; a = a->Next) {
+        if (a->OperStatus != IfOperStatusUp || a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+        char name[256] = {};
+        WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, name, sizeof name - 1, nullptr, nullptr);
+        for (auto* u = a->FirstUnicastAddress; u; u = u->Next) {
+            if (u->Address.lpSockaddr->sa_family != AF_INET) continue;
+            char ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &((sockaddr_in*)u->Address.lpSockaddr)->sin_addr, ip, sizeof ip);
+            out.push_back(std::string(ip) + " (" + name + ")");
+        }
+    }
+    return out;
+#else
     ifaddrs* ifa = nullptr;
     if (getifaddrs(&ifa) != 0) return out;
     for (ifaddrs* p = ifa; p; p = p->ifa_next) {
@@ -356,4 +425,5 @@ std::vector<std::string> NetPeer::localAddresses() {
     }
     freeifaddrs(ifa);
     return out;
+#endif
 }

@@ -271,7 +271,7 @@ void solverSnapshot(FlowField& out) {
 	const float* __restrict fi = f_in.data();
 	const size_t N = totalCells;
 	#pragma omp parallel for schedule(static)
-	for (size_t idx = 0; idx < N; idx++) {
+	for (std::ptrdiff_t idx = 0; idx < (std::ptrdiff_t)N; idx++) {
 		float rho = 0.f, u = 0.f, v = 0.f, w = 0.f;
 		#pragma clang loop unroll(full)
 		for (int i = 0; i < 19; i++) {

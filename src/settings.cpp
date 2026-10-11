@@ -4,7 +4,6 @@
 #include <fstream>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include <sys/stat.h>
 
 namespace fs = std::filesystem;
 
@@ -47,7 +46,7 @@ bool settingsSave(const std::string& apiKey, const std::string& model, std::stri
         f << j.dump(2) << "\n";
         if (!f) { err = "couldn't write " + p.string(); return false; }
     }
-    chmod(p.c_str(), 0600); // the key is a secret
+    { std::error_code ec; fs::permissions(p, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace, ec); } // the key is a secret
     gKey = trim(apiKey), gModel = trim(model);
     return true;
 }

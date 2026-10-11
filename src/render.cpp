@@ -6,6 +6,15 @@
 #if defined(__APPLE__)
     #define GL_SILENCE_DEPRECATION
     #include <OpenGL/gl3.h>
+#elif defined(_WIN32)
+    // windows.h clashes with raylib, so define what <GL/gl.h> needs (as GLFW does)
+    #ifndef APIENTRY
+        #define APIENTRY __stdcall
+    #endif
+    #ifndef WINGDIAPI
+        #define WINGDIAPI __declspec(dllimport)
+    #endif
+    #include <GL/gl.h> // OpenGL 1.1 only; use rlgl.h for anything newer
 #else
     #include <GL/gl.h>
 #endif
@@ -27,7 +36,7 @@ void camera_loop(AppState& appState, Render3DState& cameraState) {
     cameraState.dist *= 1.0f - GetMouseWheelMove() * 0.1f; // zoom step scales with distance
     cameraState.dist = Clamp(cameraState.dist, 0.00000000000001f, 4000000000000.0f); // far enough to see the whole 160x80x80 grid
 
-    cameraState.camera.position = (Vector3){
+    cameraState.camera.position = Vector3{
         cameraState.dist * cosf(cameraState.pitch) * sinf(cameraState.yaw),
         cameraState.dist * sinf(cameraState.pitch),
         cameraState.dist * cosf(cameraState.pitch) * cosf(cameraState.yaw)
