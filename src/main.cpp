@@ -78,7 +78,7 @@ int main() {
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
         BeginDrawing();
-        ClearBackground(WHITE);
+        ClearBackground(BLACK);
         key_loop(*appState, *uiState);
         if (appState->screen == APP_SCREEN_UI) {
             camera_loop(*appState, *cameraState);
