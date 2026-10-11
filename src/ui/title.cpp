@@ -223,22 +223,6 @@ void titleDraw() {
     const double now = GetTime();
     ImDrawList *dl = ImGui::GetBackgroundDrawList();
 
-    // background + faint drafting grid
-    // DrawRectangle(0, 0, (int)W, (int)H, toColor(pro::kBg));
-    // for (int x = 0, i = 0; x < (int)W; x += 24, ++i)
-    //     DrawRectangle(x, 0, 1, (int)H, toColor(pro::kGridLine, i % 4 ? 0.55f : 1.0f));
-    // for (int y = 0, i = 0; y < (int)H; y += 24, ++i)
-    //     DrawRectangle(0, y, (int)W, 1, toColor(pro::kGridLine, i % 4 ? 0.55f : 1.0f));
-
-    // header strip
-    // dl->AddText(gFontMono, 12.0f, {kMargin, 19}, pro::kTextDim, "WING-IT");
-    // dl->AddText(gFontMono, 12.0f, {kMargin + textW(gFontMono, 12.0f, "WING-IT") + 14, 19}, pro::kTextFaint,
-    //             "VIRTUAL WIND TUNNEL");
-    // {
-    //     const char *r = "REAL-TIME CFD";
-    //     dl->AddText(gFontMono, 12.0f, {W - kMargin - textW(gFontMono, 12.0f, r), 19}, pro::kTextFaint, r);
-    // }
-    // dl->AddLine({kMargin, 44.5f}, {W - kMargin, 44.5f}, pro::kHairline);
 
     // simulation viewport
     const Box v = L.view;
@@ -254,69 +238,12 @@ void titleDraw() {
 
     // overlay labels
     const float ms = 12.0f;
-    // dl->AddText(gFontMono, ms, {v.x + 12, v.y + 10}, pro::kTextDim, "FLOW  +X");
-    // dl->AddLine({v.x + 12 + textW(gFontMono, ms, "FLOW  +X") + 8, v.y + 17.5f},
-    //             {v.x + 12 + textW(gFontMono, ms, "FLOW  +X") + 40, v.y + 17.5f}, pro::kTextDim);
-    // {
-    //     const char *r = "PRESSURE COLOUR  /  STREAMLINES";
-    //     dl->AddText(gFontMono, ms, {v.x + v.w - 12 - textW(gFontMono, ms, r), v.y + 10}, pro::kTextFaint, r);
-    // }
-    // pressure scale, bottom right
-    {
-        // const float bw = 120, bh = 5, bx = v.x + v.w - 12 - bw, by = v.y + v.h - 24;
-        // const int seg = 24;
-        // dl->AddRectFilled({bx - 56, by - 10}, {v.x + v.w - 3, v.y + v.h - 3}, withAlpha(pro::kPanel, 0.85f), 2.0f);
-        // for (int i = 0; i < seg; ++i)
-        //     dl->AddRectFilledMultiColor({bx + bw * i / seg, by}, {bx + bw * (i + 1) / seg, by + bh},
-        //                                 jet((float)i / seg), jet((float)(i + 1) / seg), jet((float)(i + 1) / seg), jet((float)i / seg));
-        // dl->AddRect({bx - 0.5f, by - 0.5f}, {bx + bw + 0.5f, by + bh + 0.5f}, withAlpha(IM_COL32(0, 0, 0, 255), 0.6f));
-        // dl->AddText(gFontMono, 11.0f, {bx - textW(gFontMono, 11.0f, "p  LOW") - 8, by - 4}, pro::kTextDim, "p  LOW");
-        // dl->AddText(gFontMono, 11.0f, {bx + bw - textW(gFontMono, 11.0f, "HIGH"), by + bh + 3}, pro::kTextFaint, "HIGH");
-    }
-    // if (!gVisitLoaded) {
-    //     const char *m = gEntries.empty() ? "NO SAMPLE MODELS FOUND" : "INITIALISING SOLVER";
-    //     dl->AddText(gFontMono, ms, {std::round(v.x + (v.w - textW(gFontMono, ms, m)) * 0.5f), v.y + v.h * 0.5f - 6}, pro::kTextDim, m);
-    // }
-    // time until the next model, as a hairline along the bottom edge
+
     if (std::isfinite(gNextSwitch)) {
         const float p = std::clamp((float)((now - gShownAt) / (gNextSwitch - gShownAt)), 0.0f, 1.0f);
         dl->AddLine({v.x, v.y + v.h + 0.5f}, {v.x + v.w * p, v.y + v.h + 0.5f}, withAlpha(pro::kAccent, 0.7f));
     }
 
-    // readouts under the viewport
-    // {
-    //     char buf[160];
-    //     float x = v.x;
-    //     auto field = [&](const char *label, const char *value) {
-    //         dl->AddText(gFontMono, ms, {x, L.readY}, pro::kTextFaint, label);
-    //         x += textW(gFontMono, ms, label) + 8;
-    //         dl->AddText(gFontMono, ms, {x, L.readY}, pro::kText, value);
-    //         x += textW(gFontMono, ms, value) + 28;
-    //     };
-    //     field("MODEL", cur ? cur->file.c_str() : "--");
-    //     snprintf(buf, sizeof buf, "%d x %d x %d", gGrid[0], gGrid[1], gGrid[2]);
-    //     field("GRID", cur ? buf : "--");
-    //     const float cd = solverForces({}, {}).cd;
-    //     snprintf(buf, sizeof buf, "%.3f", cd);
-    //     field("Cd", cur && now - gShownAt > 1.0 && std::isfinite(cd) ? buf : "--");
-    //
-    //     int usable = 0, idx = 0;
-    //     for (int i = 0; i < (int)gEntries.size(); ++i)
-    //         if (!gEntries[i].bad) {
-    //             ++usable;
-    //             if (i == gCurrent) idx = usable;
-    //         }
-    //     snprintf(buf, sizeof buf, "%02d / %02d", cur ? idx : 0, usable);
-    //     dl->AddText(gFontMono, ms, {v.x + v.w - textW(gFontMono, ms, buf), L.readY}, pro::kTextFaint, buf);
-    // }
-
-    // // footer
-    // dl->AddLine({kMargin, L.footY + 0.5f}, {W - kMargin, L.footY + 0.5f}, pro::kHairline);
-    // dl->AddText(gFontBody, 14.0f, {kMargin, L.footY + 13}, pro::kTextFaint, "D3Q19 Lattice Boltzmann  \xC2\xB7  wind tunnel");
-    // {
-    //     const char *r = "PRESS ENTER TO BEGIN";
-    //     dl->AddText(gFontMono, 12.0f, {W - kMargin - textW(gFontMono, 12.0f, r), L.footY + 15}, pro::kTextFaint, r);
-    // }
 }
 
 // --- menu: one centred row of flat buttons, the first one filled with the accent ---
