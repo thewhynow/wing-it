@@ -37,6 +37,7 @@ int main() {
     start_server_thread();
 
     ImGuiIO& io = ImGui::GetIO();
+    io.ConfigDebugIgnoreFocusLoss = true; // macOS screen recording flips the window to "unfocused", which made ImGui drop text-box input
     SetExitKey(KEY_NULL);
 
     bodyFont = io.Fonts->AddFontFromFileTTF("assets/fonts/HelveticaNeue.ttc", 18.0f);
