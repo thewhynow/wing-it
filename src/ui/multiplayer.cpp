@@ -141,8 +141,8 @@ void drawPick(AppState& app, UiState& ui) {
         ImGui::SliderFloat(axes[i], &pickRot[i], -180.0f, 180.0f, "%.0f deg");
     ImGui::EndDisabled();
 
-    ImGui::TextDisabled("Fixed conditions: grid %d, wind %.2f, tau %.2f, %d steps, AoA %.0f",
-                        mp::kGridSize, mp::kInletU, mp::kTau, mp::kSteps, mp::kAoaDeg);
+    ImGui::TextDisabled("Fixed conditions: grid %d, wind %.2f, tau %.2f, %d steps",
+                        mp::kGridSize, mp::kInletU, mp::kTau, mp::kSteps);
     ImGui::TextDisabled("Score = Cd / triangles. Greater score wins.");
 
     if (match.myReady) {
