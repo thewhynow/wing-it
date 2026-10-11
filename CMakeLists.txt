@@ -152,3 +152,5 @@ add_custom_command(TARGET wing_it POST_BUILD
         "$<TARGET_FILE_DIR:wing_it>/assets"
         COMMENT "Copying assets directory to build folder..."
 )
+
+include(packaging/packaging.cmake)

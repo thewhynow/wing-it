@@ -16,15 +16,18 @@
 #include "models.hpp"
 #include "style.hpp"
 #include "settings.hpp"
+#include "app_icon.hpp"
 
 ImFont* bodyFont = nullptr;
 
 int main() {
+    wingit::UseAppFolder();
     const auto appState = new AppState;
     const auto uiState = new UiState;
     const auto cameraState = new Render3DState;
 
     InitWindow(appState->window.width, appState->window.height, "wing-it  -  wind tunnel");
+    wingit::SetWindowLogo();
     rlImGuiSetup(true);
     titleInit();
     settingsLoad();

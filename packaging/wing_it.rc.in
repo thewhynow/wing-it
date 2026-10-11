@@ -1,0 +1,3 @@
+// Generated into the build folder by packaging/packaging.cmake.
+// Gives "Wing It.exe" the logo as its icon in Explorer and on the taskbar.
+IDI_APP_ICON ICON "@WINGIT_ICO_PATH@"

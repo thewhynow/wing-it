@@ -2,7 +2,7 @@
 # on every push/PR to main. Pushing a tag that starts with "v" (e.g. v1.0.0) also
 # publishes a GitHub Release with the packaged builds attached.
 #
-# Requires install() rules and include(CPack) in CMakeLists.txt for the packaging step.
+# Packaging comes from packaging/packaging.cmake (included at the end of CMakeLists.txt).
 #
 # Caching:
 #   - Dependencies downloaded by FetchContent (raylib, json, glm, ...) are kept
@@ -56,7 +56,7 @@ jobs:
             os: macos-latest          # Apple Silicon (arm64)
             c_compiler: clang
             cpp_compiler: clang++
-            cpack_generator: TGZ
+            cpack_generator: ZIP
             package: true
             cmake_args: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           - name: windows-msvc
@@ -218,4 +218,10 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          body: |
+            ## Which file do I download?
+            GitHub always adds two "Source code" downloads below - ignore those, they are not the game.
+            - **Windows:** `WingIt-Windows.zip`
+            - **macOS:** `WingIt-macOS.zip`
+            - **Linux:** `WingIt-Linux.tar.gz`
           prerelease: ${{ contains(github.ref_name, '-') }}   # v1.0.0-beta → pre-release
