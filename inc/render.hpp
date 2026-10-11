@@ -34,5 +34,11 @@ void renderSetMesh(const TriMesh& mesh);
 void renderFrame(const FlowField& field, const Forces& forces, float slicePos);
 void renderShutdown();
 
+// halftime preview: the raw (unrotated, unfitted) mesh, drawn rotated like buildModel does (Rx*Ry*Rz), no voxelizing.
+void renderSetPreviewMesh(const TriMesh& rawMesh);
+// draws the preview into an internal w x h render texture and returns it (flip V when showing it with ImGui::Image).
+// call on the main thread between BeginDrawing/EndDrawing, outside BeginMode3D.
+RenderTexture2D renderMeshPreview(int w, int h, glm::vec3 rotationDeg, Color background);
+
 void camera_loop(AppState& appState, Render3DState& cameraState);
 void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState);

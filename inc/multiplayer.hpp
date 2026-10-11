@@ -5,6 +5,12 @@
 //
 // Protocol: one message per line, fields separated by TAB:
 //   HELLO v name | PICK model | READY model | PROGRESS pct | RESULT cd tris model | REMATCH | BYE
+//   CD cd            sender's drag coefficient so far (sent periodically during the battle)
+//   HALF cd          sender reached halftime (kHalfSteps) and paused; cd = its Cd so far
+//   ROT x y z        sender's model rotation in degrees (battle start, live while at halftime)
+//   RESUME x y z     sender left halftime with this rotation and is racing the second half
+// Halftime: at kHalfSteps each side pauses on its own, may re-rotate its model, and resumes (re-voxelize +
+// flow restart, step counter keeps going). Nobody waits for anybody; scoring is unchanged.
 // The Match class below is pure logic (no raylib/imgui) so it can be tested headlessly.
 #include <algorithm>
 #include <cmath>
@@ -29,7 +35,9 @@ constexpr float kTau       = 0.55f;
 constexpr float kAoaDeg    = 0.0f;
 constexpr int   kSteps     = 1500;   // fixed step count
 constexpr int   kAvgWindow = 300;    // Cd averaged over the last kAvgWindow steps
-constexpr int   kProtocol  = 1;
+constexpr int   kHalfSteps = kSteps / 2; // halftime: local sim pauses here
+constexpr int   kProtocol  = 2;          // 2: halftime (CD/HALF/ROT/RESUME)
+static_assert(kHalfSteps < kSteps - kAvgWindow, "halftime must come before the Cd averaging window");
 
 struct Result {
     bool have = false;
@@ -71,7 +79,33 @@ struct Peer {
     bool picked = false, ready = false, rematch = false;
     int progress = 0; // percent
     Result res;
+    // halftime / live status (all optional: an older peer simply never sends these)
+    bool haveCd = false;
+    float cd = 0.0f;              // Cd so far
+    bool halftime = false;        // currently paused at halftime
+    bool pastHalftime = false;    // resumed into the second half
+    float halftimeCd = 0.0f;
+    bool haveRot = false;
+    glm::vec3 rot{0.0f};          // degrees
 };
+
+inline bool parseRot(const std::vector<std::string>& f, glm::vec3& out) {
+    if (f.size() < 4) return false;
+    glm::vec3 r;
+    for (int i = 0; i < 3; ++i) {
+        r[i] = std::strtof(f[i + 1].c_str(), nullptr);
+        if (!std::isfinite(r[i])) return false;
+        r[i] = std::max(-180.0f, std::min(180.0f, r[i]));
+    }
+    out = r;
+    return true;
+}
+
+inline std::string fmtFloat(float v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.6g", (double)(std::isfinite(v) ? v : 0.0f));
+    return buf;
+}
 
 class Match {
 public:
@@ -82,6 +116,8 @@ public:
     std::string myName = "Player";
     std::string myModel;
     bool myReady = false, myRematch = false, sentResult = false;
+    bool myHalftime = false;      // I'm paused at halftime (sub-state of Battle)
+    bool myPastHalftime = false;  // I've resumed into the second half
     mp::Result myRes;
     Peer peer;
     bool peerGone = false;        // peer disconnected/left (only tolerated once its result is in / on result screen)
@@ -110,6 +146,23 @@ public:
     bool takeStart() { bool s = startPending; startPending = false; return s; }
 
     void sendProgress(int pct) { if (phase == Battle) net.send("PROGRESS\t" + std::to_string(pct)); }
+    void sendCd(float cd) { if (phase == Battle) net.send("CD\t" + fmtFloat(cd)); }
+    void sendRotation(glm::vec3 r) {
+        if (phase == Battle) net.send("ROT\t" + fmtFloat(r.x) + "\t" + fmtFloat(r.y) + "\t" + fmtFloat(r.z));
+    }
+    // local sim hit kHalfSteps and paused
+    void enterHalftime(float cdSoFar) {
+        if (phase != Battle || myHalftime || myPastHalftime || sentResult) return;
+        myHalftime = true;
+        net.send("HALF\t" + fmtFloat(cdSoFar));
+    }
+    // leaving halftime with (possibly) a new rotation
+    void leaveHalftime(glm::vec3 r) {
+        if (phase != Battle || !myHalftime) return;
+        myHalftime = false;
+        myPastHalftime = true;
+        net.send("RESUME\t" + fmtFloat(r.x) + "\t" + fmtFloat(r.y) + "\t" + fmtFloat(r.z));
+    }
     // local sim finished: raw (pre-rotation) mesh triangle count
     void finished(float cd, int tris) {
         if (phase != Battle || sentResult) return;
@@ -157,9 +210,13 @@ public:
         if (phase == Pick && myReady && peer.ready) {
             phase = Battle;
             sentResult = false;
+            myHalftime = myPastHalftime = false;
             myRes = {};
             peer.res = {};
             peer.progress = 0;
+            peer.haveCd = peer.halftime = peer.pastHalftime = peer.haveRot = false;
+            peer.cd = peer.halftimeCd = 0.0f;
+            peer.rot = glm::vec3(0.0f);
             startPending = true;
         }
         if (phase == Battle && myRes.have && peer.res.have) phase = Result;
@@ -180,6 +237,7 @@ private:
 
     void resetAll() {
         phase = Lobby; myModel.clear(); myReady = myRematch = sentResult = false; myRes = {};
+        myHalftime = myPastHalftime = false;
         peer = {}; peerGone = false; startPending = false; fatal.clear(); lobbyError.clear();
         peerLeftNote.clear(); helloSent = gotHello = false;
     }
@@ -190,6 +248,7 @@ private:
         peer = {};
         peer.name = keepName;
         myReady = myRematch = sentResult = false;
+        myHalftime = myPastHalftime = false;
         myRes = {};
         (void)rematch;
         if (!myModel.empty()) net.send("PICK\t" + myModel);
@@ -214,6 +273,25 @@ private:
             int tris = std::max(1, std::atoi(f[2].c_str()));
             peer.res = {true, cd, tris, f[3]};
             peer.progress = 100;
+            peer.cd = cd; peer.haveCd = true;
+            peer.halftime = false;
+        } else if (c == "CD" && f.size() >= 2) {
+            float cd = std::strtof(f[1].c_str(), nullptr);
+            if (std::isfinite(cd) && !peer.res.have) { peer.cd = cd; peer.haveCd = true; }
+        } else if (c == "HALF" && f.size() >= 2) {
+            float cd = std::strtof(f[1].c_str(), nullptr);
+            if (!std::isfinite(cd)) cd = 0.0f;
+            if (!peer.res.have) {
+                peer.halftime = true;
+                peer.halftimeCd = peer.cd = cd; peer.haveCd = true;
+                peer.progress = std::max(peer.progress, 50);
+            }
+        } else if (c == "ROT") {
+            if (parseRot(f, peer.rot)) peer.haveRot = true;
+        } else if (c == "RESUME") {
+            if (parseRot(f, peer.rot)) peer.haveRot = true;
+            peer.halftime = false;
+            peer.pastHalftime = true;
         } else if (c == "REMATCH") {
             peer.rematch = true;
         } else if (c == "BYE") {
@@ -234,4 +312,9 @@ bool mpTakeSimRequest(MpSimRequest& req);          // main: true once when a bat
 void mpSimBegin(int triangles);                    // main: after the model is built, just before the solver starts
 void mpSimFailed(const std::string& why);          // main: model could not be loaded
 void mpAfterStep();                                // solver thread: call after every solverStep
+// halftime: mpAfterStep stops counting at kHalfSteps and the UI switches to APP_SCREEN_MP_HALFTIME (main stops the
+// solver there like behind any menu). "Resume" queues a request; main then does stopSolver -> rotation = rot ->
+// buildModel -> mpSimResume -> startSolver. The step counter continues from kHalfSteps.
+bool mpTakeResume(glm::vec3& rotationDeg);         // main: true once when the player resumes from halftime
+void mpSimResume();                                // main: after buildModel, just before the solver restarts
 void mpShutdown();                                 // on exit: close sockets

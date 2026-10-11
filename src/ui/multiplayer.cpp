@@ -4,6 +4,7 @@
 #include <imgui.h>
 #include <raylib.h>
 #include "multiplayer.hpp"
+#include "render.hpp"
 #include "solver.hpp"
 #include "ui.hpp"
 
@@ -23,12 +24,36 @@ MpSimRequest pendingReq;
 bool reqPending = false;
 std::atomic<bool> simActive{false}, simDone{false};
 std::atomic<int> simSteps{0};
-std::atomic<float> simCd{0.0f};
+std::atomic<float> simCd{0.0f};      // Cd so far (held steady through flow restarts, see mpAfterStep)
+std::atomic<bool> cdValid{false};    // simCd has a real sample yet
+std::atomic<int> cdHoldUntil{0};     // don't sample Cd before this step (transient after a flow (re)start / avg reset)
 int simTris = 1;
 int lastSentPct = -1;
+double lastCdSend = -100.0;
+constexpr int kCdSettle = 100;       // steps
+
+// --- halftime ---
+std::atomic<bool> halftimeHit{false};   // solver thread -> UI: reached kHalfSteps, counting stopped
+std::atomic<bool> halftimeUsed{false};  // halftime already happened this battle
+std::atomic<float> halftimeCd{0.0f};
+glm::vec3 curRot{0.0f};                 // rotation the current half runs with
+glm::vec3 htRot{0.0f};                  // halftime sliders
+glm::vec3 lastRotSent{0.0f};
+double lastRotSend = -100.0;
+glm::vec3 resumeRot{0.0f};
+bool resumePending = false;             // UI -> main: rebuild with resumeRot and restart the solver
+
+void resetSimFlags() {
+    simActive = false;
+    simDone = false;
+    halftimeHit = false;
+    halftimeUsed = false;
+    cdValid = false;
+    resumePending = false;
+}
 
 void backToMenu(AppState& app, UiState& ui, const std::string& msg) {
-    simActive = false;
+    resetSimFlags();
     reqPending = false;
     match.leave();
     ui.modelError = msg;
@@ -146,13 +171,133 @@ void drawBattleHud(AppState& app, UiState& ui) {
     ImGui::ProgressBar(mine, ImVec2(-FLT_MIN, 0));
     if (simDone && match.myRes.have)
         ImGui::TextColored(kGreen, "Done: Cd %.4f, %d tris. Waiting for opponent...", match.myRes.cd, match.myRes.tris);
+    else if (cdValid)
+        ImGui::TextDisabled("Cd so far: %.4f%s", simCd.load(), match.myPastHalftime ? "  (2nd half)" : "");
     ImGui::Text("%s - %s", match.peer.name.c_str(), match.peer.model.c_str());
     ImGui::ProgressBar(match.peer.progress / 100.0f, ImVec2(-FLT_MIN, 0));
-    if (match.peer.res.have) ImGui::TextColored(kGreen, "Opponent finished.");
+    if (match.peer.res.have) {
+        ImGui::TextColored(kGreen, "Opponent finished.");
+    } else {
+        if (match.peer.haveCd) ImGui::TextDisabled("Cd so far: %.4f", match.peer.cd);
+        if (match.peer.halftime) {
+            if (match.peer.haveCd) ImGui::SameLine();
+            ImGui::TextColored(kYellow, "At halftime");
+        }
+    }
     if (match.peerGone) ImGui::TextColored(kRed, "Opponent disconnected.");
+    ImGui::Checkbox("Streamlines", &ui.mpShowLines); // local view preference only
     if (ImGui::Button("Forfeit / leave"))
         backToMenu(app, ui, "");
     ImGui::End();
+}
+
+const char* peerStatus() {
+    const mp::Peer& p = match.peer;
+    if (p.res.have) return "Finished";
+    if (match.peerGone) return "Disconnected";
+    if (p.halftime) return "At halftime";
+    if (p.pastHalftime) return "Second half";
+    return "First half";
+}
+
+void rotCell(bool have, glm::vec3 r) {
+    if (have) ImGui::Text("%.0f / %.0f / %.0f", r.x, r.y, r.z);
+    else ImGui::TextDisabled("-");
+}
+
+void centeredText(const char* s, bool disabled = false) {
+    float w = ImGui::CalcTextSize(s).x;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), (ImGui::GetWindowSize().x - w) * 0.5f));
+    if (disabled) ImGui::TextDisabled("%s", s);
+    else ImGui::TextUnformatted(s);
+}
+
+void drawHalftime(AppState& app, UiState& ui) {
+    constexpr float kWinW = 640.0f;
+    centeredWindow("Halftime", kWinW);
+
+    ImGui::SetWindowFontScale(2.2f);
+    centeredText("HALFTIME");
+    ImGui::SetWindowFontScale(1.0f);
+    char sub[96];
+    std::snprintf(sub, sizeof sub, "First half complete  -  step %d of %d", mp::kHalfSteps, mp::kSteps);
+    centeredText(sub, true);
+    ImGui::Spacing();
+
+    // scoreboard
+    const mp::Peer& p = match.peer;
+    if (ImGui::BeginTable("halftime_board", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Player"); ImGui::TableSetupColumn("Model"); ImGui::TableSetupColumn("Cd so far");
+        ImGui::TableSetupColumn("Progress"); ImGui::TableSetupColumn("Status"); ImGui::TableSetupColumn("Rotation X/Y/Z");
+        ImGui::TableHeadersRow();
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(match.myName.c_str());
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(match.myModel.c_str());
+        ImGui::TableNextColumn(); ImGui::Text("%.4f", halftimeCd.load());
+        ImGui::TableNextColumn(); ImGui::Text("%d%%", std::min(100, simSteps.load() * 100 / mp::kSteps));
+        ImGui::TableNextColumn(); ImGui::TextUnformatted("At halftime");
+        ImGui::TableNextColumn(); rotCell(true, curRot);
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(p.name.c_str());
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(p.model.c_str());
+        ImGui::TableNextColumn();
+        if (p.res.have) ImGui::Text("%.4f (final)", p.res.cd);
+        else if (p.haveCd) ImGui::Text("%.4f", p.cd);
+        else ImGui::TextDisabled("-");
+        ImGui::TableNextColumn(); ImGui::Text("%d%%", p.progress);
+        ImGui::TableNextColumn();
+        if (match.peerGone && !p.res.have) ImGui::TextColored(kRed, "%s", peerStatus());
+        else ImGui::TextUnformatted(peerStatus());
+        ImGui::TableNextColumn(); rotCell(p.haveRot, p.rot);
+        ImGui::EndTable();
+    }
+    if (match.peerGone)
+        ImGui::TextColored(kRed, "Opponent disconnected after finishing - you can still complete your run.");
+    else if (p.halftime)
+        ImGui::TextDisabled("%s is at halftime too.", p.name.c_str());
+    else if (!p.res.have)
+        ImGui::TextDisabled("%s is still racing - nobody waits at halftime.", p.name.c_str());
+
+    ImGui::SeparatorText("Adjust your setup");
+    // live preview of the raw mesh at the slider rotation (nothing is voxelized until Resume)
+    const float pw = kWinW - 2.0f * ImGui::GetStyle().WindowPadding.x, ph = 240.0f;
+    ImVec4 bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+    Color bgc = {(unsigned char)(bg.x * 255), (unsigned char)(bg.y * 255), (unsigned char)(bg.z * 255), 255};
+    RenderTexture2D rt = renderMeshPreview((int)pw, (int)ph, htRot, bgc);
+    ImGui::Image(ImTextureID(rt.texture.id), ImVec2(pw, ph), ImVec2(0, 1), ImVec2(1, 0)); // render textures are upside down
+    ImGui::TextDisabled("Wind blows along +X (arrow). The tunnel is re-voxelized when you resume.");
+
+    const char* axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
+    for (int i = 0; i < 3; ++i)
+        ImGui::SliderFloat(axes[i], &htRot[i], -180.0f, 180.0f, "%.0f deg");
+    if (ImGui::Button("Reset")) htRot = glm::vec3(0.0f);
+    ImGui::SameLine();
+    if (ImGui::Button("First-half rotation")) htRot = curRot;
+
+    // let the opponent watch the adjustments (throttled)
+    if (htRot != lastRotSent && GetTime() - lastRotSend > 0.15) {
+        match.sendRotation(htRot);
+        lastRotSent = htRot;
+        lastRotSend = GetTime();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextWrapped("Resuming restarts the flow around the new orientation. The final Cd is still averaged over the last %d steps.",
+                       mp::kAvgWindow);
+    if (ImGui::Button("Resume second half", ImVec2(pw * 0.7f, 0))) {
+        resumeRot = htRot;
+        resumePending = true;
+        curRot = htRot;
+        match.leaveHalftime(htRot);
+        app.screen = APP_SCREEN_MP_BATTLE;
+    }
+    ImGui::SameLine();
+    bool forfeit = ImGui::Button("Forfeit", ImVec2(-FLT_MIN, 0));
+    ImGui::End();
+    if (forfeit)
+        backToMenu(app, ui, "");
 }
 
 void resultRow(const char* who, const mp::Result& r) {
@@ -206,6 +351,8 @@ void mpEnter(AppState& app) {
         std::snprintf(nameBuf, sizeof nameBuf, "%s", u && *u ? u : "Player");
     }
     match.leave();
+    resetSimFlags();
+    reqPending = false;
     pickIdx = 0;
     pickRot = glm::vec3(0.0f);
     app.screen = APP_SCREEN_MP_LOBBY;
@@ -227,17 +374,26 @@ void mpDrawUi(AppState& app, UiState& ui) {
                 if (!ui.models.empty()) match.setPick(ui.models[pickIdx]);
             }
             break;
-        case mp::Match::Battle: app.screen = APP_SCREEN_MP_BATTLE; break;
+        case mp::Match::Battle: app.screen = match.myHalftime ? APP_SCREEN_MP_HALFTIME : APP_SCREEN_MP_BATTLE; break;
         case mp::Match::Result: app.screen = APP_SCREEN_MP_RESULT; break;
     }
     if (match.takeStart() && !ui.models.empty()) {
         pendingReq = {match.myModel, pickRot};
         reqPending = true;
-        simDone = false; simActive = false; simSteps = 0; lastSentPct = -1;
+        resetSimFlags(); simSteps = 0; lastSentPct = -1; lastCdSend = -100.0;
+        curRot = htRot = lastRotSent = pickRot;
+        match.sendRotation(pickRot);
     }
     if (match.phase == mp::Match::Battle) {
+        // solver thread reached kHalfSteps and stopped counting: go to the halftime screen (main then stops the solver)
+        if (halftimeHit.exchange(false) && !match.myHalftime) {
+            match.enterHalftime(halftimeCd);
+            htRot = lastRotSent = curRot;
+            app.screen = APP_SCREEN_MP_HALFTIME;
+        }
         int pct = std::min(100, simSteps.load() * 100 / mp::kSteps);
         if (simActive && pct != lastSentPct) { lastSentPct = pct; match.sendProgress(pct); }
+        if (simActive && cdValid && GetTime() - lastCdSend > 0.5) { lastCdSend = GetTime(); match.sendCd(simCd); }
         if (simDone && !match.myRes.have) {
             match.finished(simCd, simTris);
             match.update(); // maybe the opponent was already done
@@ -249,6 +405,7 @@ void mpDrawUi(AppState& app, UiState& ui) {
         case APP_SCREEN_MP_PICK:   drawPick(app, ui); break;
         case APP_SCREEN_MP_BATTLE: drawBattleHud(app, ui); break;
         case APP_SCREEN_MP_RESULT: drawResult(app, ui); break;
+        case APP_SCREEN_MP_HALFTIME: drawHalftime(app, ui); break;
         default: break;
     }
 }
@@ -262,11 +419,29 @@ bool mpTakeSimRequest(MpSimRequest& req) {
 
 void mpSimBegin(int triangles) {
     simTris = triangles;
+    resetSimFlags(); // solver thread is stopped here
     simSteps = 0;
-    simDone = false;
     simCd = 0.0f;
+    halftimeCd = 0.0f;
+    cdHoldUntil = kCdSettle;
     solverResetDragAverage();
     simActive = true; // main starts the solver thread right after this
+}
+
+bool mpTakeResume(glm::vec3& rotationDeg) {
+    if (!resumePending) return false;
+    resumePending = false;
+    rotationDeg = resumeRot;
+    return true;
+}
+
+void mpSimResume() {
+    // solver is stopped and buildModel's solverReset just cleared the drag average. The step count carries on from
+    // kHalfSteps, so the final averaging window in mpAfterStep is unchanged; "Cd so far" holds the halftime value
+    // while the restarted flow gets past its start-up transient.
+    simCd = halftimeCd.load();
+    cdHoldUntil = simSteps.load() + kCdSettle;
+    simActive = true;
 }
 
 void mpSimFailed(const std::string& why) {
@@ -278,9 +453,26 @@ void mpAfterStep() {
     if (!simActive) return;
     int s = ++simSteps;
     constexpr int windowStart = mp::kSteps - mp::kAvgWindow;
-    if (s == windowStart) solverResetDragAverage();
-    if (s >= windowStart && (s % 10 == 0 || s == mp::kSteps))
+    if (s == windowStart) {
+        solverResetDragAverage();
+        cdHoldUntil = s + std::min(kCdSettle, mp::kAvgWindow / 2); // keep reporting the previous value for a bit
+    }
+    if (s >= cdHoldUntil && s % 10 == 0) {
         simCd = solverDragCoefficient();
+        cdValid = true;
+    }
+    if (s == mp::kHalfSteps && !halftimeUsed) {
+        // halftime: stop counting. The UI picks up halftimeHit, main stops the solver behind the halftime screen,
+        // and any steps this thread runs before that are discarded by the rebuild on resume.
+        float cd = solverDragCoefficient();
+        halftimeCd = cd;
+        simCd = cd;
+        cdValid = true;
+        halftimeUsed = true;
+        simActive = false;
+        halftimeHit = true;
+        return;
+    }
     if (s >= mp::kSteps) {
         simCd = solverDragCoefficient();
         simActive = false;

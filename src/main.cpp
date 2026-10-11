@@ -85,7 +85,8 @@ int main() {
         BeginDrawing();
         ClearBackground(BLACK);
         key_loop(*appState, *uiState);
-        if (appState->screen == APP_SCREEN_UI || appState->screen == APP_SCREEN_MP_BATTLE) {
+        if (appState->screen == APP_SCREEN_UI || appState->screen == APP_SCREEN_MP_BATTLE
+            || appState->screen == APP_SCREEN_MP_HALFTIME) { // halftime: frozen flow behind the panel
             camera_loop(*appState, *cameraState);
             voxel_loop(*appState, *cameraState, *uiState);
         }
@@ -119,11 +120,21 @@ int main() {
                 uiState->gridSize = mp::kGridSize;
                 uiState->rotation = req.rotation;
                 buildModel();
+                renderSetPreviewMesh(rawMesh); // halftime preview
                 mpSimBegin((int)(rawMesh.indices.size() / 3)); // raw, pre-rotation mesh
                 startSolver();
             } else {
                 mpSimFailed("couldn't load " + req.model);
             }
+        }
+
+        // multiplayer halftime -> second half: re-voxelize at the new rotation, step count carries on
+        if (glm::vec3 rot; mpTakeResume(rot)) {
+            stopSolver();
+            uiState->rotation = rot;
+            buildModel();
+            mpSimResume();
+            startSolver();
         }
 
         // the solver reads the grid every step, so it has to be stopped while the model changes
