@@ -7,6 +7,8 @@
 -Ibuild/_deps/implot-src
 -Ibuild/_deps/rlimgui-src
 -Ibuild/_deps/tinyobjloader-src
+-Ibuild/_deps/cpp-httplib-src
+-Ibuild/_deps/qrcodegen-src/cpp
 -I/opt/homebrew/opt/libomp/include
 -DNO_FONT_AWESOME
 -fopenmp

@@ -8,8 +8,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "render.hpp"
 #include "ui.hpp"
+<<<<<<< Updated upstream
 #include "geometry.hpp"
 #include "solver.hpp"
+=======
+#include "server.hpp"
+>>>>>>> Stashed changes
 
 ImFont* bodyFont = nullptr;
 
@@ -23,6 +27,7 @@ int main() {
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));
+    start_server_thread();
 
     ImGuiIO& io = ImGui::GetIO();
     SetExitKey(KEY_NULL);
@@ -117,7 +122,11 @@ int main() {
 
     threadRunning = false;
     timerThread.join();
+<<<<<<< Updated upstream
     stopSolver();
+=======
+    stop_server_thread();
+>>>>>>> Stashed changes
 
     ImPlot::DestroyContext();
     rlImGuiShutdown();
