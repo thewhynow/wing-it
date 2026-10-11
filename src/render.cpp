@@ -101,6 +101,7 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
 
 void renderSetMesh(const TriMesh& mesh){
     Mesh rayMesh;
+    memset(&rayMesh, 0, sizeof rayMesh);
 
     rayMesh.indices = (uint16_t*) MemAlloc(mesh.indices.size() * sizeof(uint16_t));
     std::memcpy(rayMesh.indices, mesh.indices.data(), mesh.indices.size() * sizeof(uint16_t));
