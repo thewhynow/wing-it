@@ -224,6 +224,36 @@ void drawHalftime(AppState& app, UiState& ui) {
     centeredText(sub, true);
     ImGui::Spacing();
 
+    // top: live preview of the raw mesh at the slider rotation (nothing is voxelized until Resume) | rotation controls
+    {
+        const float pw = 340.0f, ph = std::max(120.0f, std::min(220.0f, GetScreenHeight() * 0.3f));
+        ImVec4 bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+        Color bgc = {(unsigned char)(bg.x * 255), (unsigned char)(bg.y * 255), (unsigned char)(bg.z * 255), 255};
+        RenderTexture2D rt = renderMeshPreview((int)pw, (int)ph, htRot, bgc);
+        ImGui::Image(ImTextureID(rt.texture.id), ImVec2(pw, ph), ImVec2(0, 1), ImVec2(1, 0)); // render textures are upside down
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::TextUnformatted("Adjust your setup");
+        ImGui::TextDisabled("Wind blows along +X (arrow).");
+        ImGui::Spacing();
+        ImGui::PushItemWidth(-ImGui::CalcTextSize("Rotate X").x - ImGui::GetStyle().ItemInnerSpacing.x);
+        const char* axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
+        for (int i = 0; i < 3; ++i)
+            ImGui::SliderFloat(axes[i], &htRot[i], -180.0f, 180.0f, "%.0f deg");
+        ImGui::PopItemWidth();
+        if (ImGui::Button("Reset")) htRot = glm::vec3(0.0f);
+        ImGui::SameLine();
+        if (ImGui::Button("First-half rotation")) htRot = curRot;
+        ImGui::EndGroup();
+    }
+    // let the opponent watch the adjustments (throttled)
+    if (htRot != lastRotSent && GetTime() - lastRotSend > 0.15) {
+        match.sendRotation(htRot);
+        lastRotSent = htRot;
+        lastRotSend = GetTime();
+    }
+    ImGui::Spacing();
+
     // scoreboard
     const mp::Peer& p = match.peer;
     if (ImGui::BeginTable("halftime_board", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
@@ -237,7 +267,7 @@ void drawHalftime(AppState& app, UiState& ui) {
         ImGui::TableNextColumn(); ImGui::Text("%.4f", halftimeCd.load());
         ImGui::TableNextColumn(); ImGui::Text("%d%%", std::min(100, simSteps.load() * 100 / mp::kSteps));
         ImGui::TableNextColumn(); ImGui::TextUnformatted("At halftime");
-        ImGui::TableNextColumn(); rotCell(true, curRot);
+        ImGui::TableNextColumn(); rotCell(true, htRot);
 
         ImGui::TableNextRow();
         ImGui::TableNextColumn(); ImGui::TextUnformatted(p.name.c_str());
@@ -260,32 +290,10 @@ void drawHalftime(AppState& app, UiState& ui) {
     else if (!p.res.have)
         ImGui::TextDisabled("%s is still racing - nobody waits at halftime.", p.name.c_str());
 
-    ImGui::SeparatorText("Adjust your setup");
-    // live preview of the raw mesh at the slider rotation (nothing is voxelized until Resume)
-    const float pw = kWinW - 2.0f * ImGui::GetStyle().WindowPadding.x, ph = 240.0f;
-    ImVec4 bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
-    Color bgc = {(unsigned char)(bg.x * 255), (unsigned char)(bg.y * 255), (unsigned char)(bg.z * 255), 255};
-    RenderTexture2D rt = renderMeshPreview((int)pw, (int)ph, htRot, bgc);
-    ImGui::Image(ImTextureID(rt.texture.id), ImVec2(pw, ph), ImVec2(0, 1), ImVec2(1, 0)); // render textures are upside down
-    ImGui::TextDisabled("Wind blows along +X (arrow). The tunnel is re-voxelized when you resume.");
-
-    const char* axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
-    for (int i = 0; i < 3; ++i)
-        ImGui::SliderFloat(axes[i], &htRot[i], -180.0f, 180.0f, "%.0f deg");
-    if (ImGui::Button("Reset")) htRot = glm::vec3(0.0f);
-    ImGui::SameLine();
-    if (ImGui::Button("First-half rotation")) htRot = curRot;
-
-    // let the opponent watch the adjustments (throttled)
-    if (htRot != lastRotSent && GetTime() - lastRotSend > 0.15) {
-        match.sendRotation(htRot);
-        lastRotSent = htRot;
-        lastRotSend = GetTime();
-    }
-
+    ImGui::TextDisabled("Resuming restarts the flow around the new orientation; final Cd = mean of the last %d steps.",
+                        mp::kAvgWindow);
     ImGui::Spacing();
-    ImGui::TextWrapped("Resuming restarts the flow around the new orientation. The final Cd is still averaged over the last %d steps.",
-                       mp::kAvgWindow);
+    const float pw = kWinW - 2.0f * ImGui::GetStyle().WindowPadding.x;
     if (ImGui::Button("Resume second half", ImVec2(pw * 0.7f, 0))) {
         resumeRot = htRot;
         resumePending = true;
