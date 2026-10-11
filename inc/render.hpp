@@ -34,4 +34,4 @@ void renderFrame(const FlowField& field, const Forces& forces, float slicePos);
 void renderShutdown();
 
 void camera_loop(AppState& appState, Render3DState& cameraState);
-void voxel_loop(AppState& appState, const Render3DState& cameraState);
+void voxel_loop(AppState& appState, Render3DState& cameraState);

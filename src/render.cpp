@@ -13,7 +13,7 @@ void camera_loop(AppState& appState, Render3DState& cameraState) {
         cameraState.pitch = Clamp(cameraState.pitch, -1.5f, 1.5f); // avoid flipping over the poles
     }
     cameraState.dist -= GetMouseWheelMove() * 0.5f; // optional zoom
-    cameraState.dist = Clamp(cameraState.dist, 3.0f, 40.0f);
+    cameraState.dist = Clamp(cameraState.dist, 1.0f, 80.0f);
 
     cameraState.camera.position = (Vector3){
         cameraState.dist * cosf(cameraState.pitch) * sinf(cameraState.yaw),
@@ -24,8 +24,9 @@ void camera_loop(AppState& appState, Render3DState& cameraState) {
     DrawCircleV(GetMousePosition(), 5, DARKBLUE);
 }
 
-void voxel_loop(AppState& appState, const Render3DState& cameraState) {
+void voxel_loop(AppState& appState, Render3DState& cameraState) {
     static int currentZIndex = 0;
+    static bool done = false;
     // currentZIndex++;
     // currentZIndex %= 1;
 
@@ -75,4 +76,20 @@ void voxel_loop(AppState& appState, const Render3DState& cameraState) {
     BeginMode3D(cameraState.camera);
     DrawModel(points, Vector3Zero(), 1.0f, RED); // one draw call
     EndMode3D();
+
+    // generate a second line of Zs
+    if (currentZIndex++ >= cameraState.grid.nz) {
+        currentZIndex = 0;
+        done = true;
+    }
+    if (!done) {
+        std::vector<Vector2> morecoords;
+        morecoords.reserve(cameraState.grid.nx * cameraState.grid.ny);
+        for (int x = -(cameraState.grid.nx/2); x < (cameraState.grid.nx/2)-1; x++) {
+            for (int y = -(cameraState.grid.ny/2); y < (cameraState.grid.ny/2)-1; y++) {
+                morecoords.push_back(Vector2(x, y));
+            }
+        }
+        cameraState.coords.push_back(morecoords);
+    }
 }
