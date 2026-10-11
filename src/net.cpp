@@ -1,4 +1,5 @@
 #include "net.hpp"
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
@@ -28,13 +29,24 @@ std::string NetPeer::error() const {
 
 void NetPeer::send(const std::string& line) {
     std::lock_guard<std::mutex> l(mu);
-    outbox.push_back(line);
+    outbox.push_back({0, line});
+}
+
+void NetPeer::sendTo(int clientId, const std::string& line) {
+    std::lock_guard<std::mutex> l(mu);
+    outbox.push_back({clientId, line});
 }
 
 bool NetPeer::pop(std::string& line) {
+    int cid = 0;
+    return pop(cid, line);
+}
+
+bool NetPeer::pop(int& clientId, std::string& line) {
     std::lock_guard<std::mutex> l(mu);
     if (inbox.empty()) return false;
-    line = std::move(inbox.front());
+    clientId = inbox.front().clientId;
+    line = std::move(inbox.front().line);
     inbox.pop_front();
     return true;
 }
@@ -46,21 +58,25 @@ void NetPeer::close() {
     std::lock_guard<std::mutex> l(mu);
     inbox.clear(); outbox.clear(); err.clear();
     st = NetState::Idle;
+    hosting = false;
+    numClients = 0;
 }
 
-void NetPeer::host(int port) {
+void NetPeer::host(int port, int maxClients) {
     close();
+    hosting = true;
     st = NetState::Listening;
-    th = std::thread([this, port] { runHost(port); });
+    th = std::thread([this, port, maxClients] { runHost(port, maxClients); });
 }
 
 void NetPeer::join(const std::string& address, int port) {
     close();
+    hosting = false;
     st = NetState::Connecting;
     th = std::thread([this, address, port] { runJoin(address, port); });
 }
 
-void NetPeer::runHost(int port) {
+void NetPeer::runHost(int port, int maxClients) {
     int ls = ::socket(AF_INET, SOCK_STREAM, 0);
     if (ls < 0) return fail(NetState::Failed, std::string("socket: ") + strerror(errno));
     int one = 1;
@@ -69,23 +85,162 @@ void NetPeer::runHost(int port) {
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_ANY);
     a.sin_port = htons((uint16_t)port);
-    if (::bind(ls, (sockaddr*)&a, sizeof a) < 0 || ::listen(ls, 1) < 0) {
+    if (::bind(ls, (sockaddr*)&a, sizeof a) < 0 || ::listen(ls, 8) < 0) {
         std::string why = std::string("can't listen on port ") + std::to_string(port) + ": " + strerror(errno);
         ::close(ls);
         return fail(NetState::Failed, why);
     }
     setNonBlocking(ls);
-    int fd = -1;
+
+    struct ClientConn {
+        int id = 0;
+        int fd = -1;
+        std::string rbuf;
+        std::string wbuf;
+    };
+    std::vector<ClientConn> clients;
+    int nextClientId = 1;
+
     while (!stop) {
-        pollfd p{ls, POLLIN, 0};
-        if (::poll(&p, 1, 100) > 0 && (p.revents & POLLIN)) {
-            fd = ::accept(ls, nullptr, nullptr);
-            if (fd >= 0) break;
+        // 1. Drain outbox
+        {
+            std::lock_guard<std::mutex> l(mu);
+            while (!outbox.empty()) {
+                auto item = std::move(outbox.front());
+                outbox.pop_front();
+                for (auto& c : clients) {
+                    if (item.targetId == 0 || item.targetId == c.id) {
+                        c.wbuf += item.line;
+                        c.wbuf += '\n';
+                    }
+                }
+            }
+        }
+
+        // 2. Build pollfd array
+        std::vector<pollfd> pfds;
+        bool canAccept = (int)clients.size() < maxClients;
+        if (canAccept) {
+            pfds.push_back({ls, POLLIN, 0});
+        }
+        for (const auto& c : clients) {
+            short ev = POLLIN;
+            if (!c.wbuf.empty()) ev |= POLLOUT;
+            pfds.push_back({c.fd, ev, 0});
+        }
+
+        int pr = ::poll(pfds.data(), (nfds_t)pfds.size(), 20);
+        if (pr < 0 && errno != EINTR) {
+            fail(NetState::Failed, "network error");
+            break;
+        }
+
+        // 3. Accept new connections
+        size_t clientStartIdx = 0;
+        if (canAccept) {
+            clientStartIdx = 1;
+            if (pr > 0 && (pfds[0].revents & POLLIN)) {
+                int cfd = ::accept(ls, nullptr, nullptr);
+                if (cfd >= 0) {
+                    setNonBlocking(cfd);
+                    int flag = 1;
+#ifdef __APPLE__
+                    setsockopt(cfd, SOL_SOCKET, SO_NOSIGPIPE, &flag, sizeof flag);
+#endif
+                    setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
+                    int cid = nextClientId++;
+                    clients.push_back({cid, cfd, "", ""});
+                    {
+                        std::lock_guard<std::mutex> l(mu);
+                        inbox.push_back({cid, "__CONNECT__"});
+                        numClients = (int)clients.size();
+                    }
+                    st = NetState::Connected;
+                }
+            }
+        }
+
+        // 4. Handle client I/O
+        char tmp[2048];
+        std::vector<int> deadClientIds;
+        for (size_t i = 0; i < clients.size(); ++i) {
+            size_t pidx = clientStartIdx + i;
+            if (pidx >= pfds.size()) break;
+            auto& c = clients[i];
+            const auto& pfd = pfds[pidx];
+
+            if (pfd.revents & POLLOUT) {
+#ifdef __APPLE__
+                ssize_t n = ::send(c.fd, c.wbuf.data(), c.wbuf.size(), 0);
+#else
+                ssize_t n = ::send(c.fd, c.wbuf.data(), c.wbuf.size(), MSG_NOSIGNAL);
+#endif
+                if (n > 0) {
+                    c.wbuf.erase(0, (size_t)n);
+                } else if (n < 0 && errno != EAGAIN && errno != EINTR) {
+                    deadClientIds.push_back(c.id);
+                    continue;
+                }
+            }
+
+            if (pfd.revents & (POLLIN | POLLHUP | POLLERR)) {
+                ssize_t n = ::recv(c.fd, tmp, sizeof tmp, 0);
+                if (n <= 0) {
+                    if (n == 0 || (errno != EAGAIN && errno != EINTR)) {
+                        deadClientIds.push_back(c.id);
+                        continue;
+                    }
+                } else {
+                    c.rbuf.append(tmp, (size_t)n);
+                    size_t pos;
+                    while ((pos = c.rbuf.find('\n')) != std::string::npos) {
+                        std::string line = c.rbuf.substr(0, pos);
+                        c.rbuf.erase(0, pos + 1);
+                        if (!line.empty() && line.back() == '\r') line.pop_back();
+                        if (!line.empty()) {
+                            std::lock_guard<std::mutex> l(mu);
+                            inbox.push_back({c.id, std::move(line)});
+                        }
+                    }
+                    if (c.rbuf.size() > kMaxLine) {
+                        deadClientIds.push_back(c.id);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // 5. Clean up disconnected clients
+        if (!deadClientIds.empty()) {
+            for (int deadId : deadClientIds) {
+                auto it = std::find_if(clients.begin(), clients.end(), [deadId](const ClientConn& cc) {
+                    return cc.id == deadId;
+                });
+                if (it != clients.end()) {
+                    ::close(it->fd);
+                    clients.erase(it);
+                    std::lock_guard<std::mutex> l(mu);
+                    inbox.push_back({deadId, "__DISCONNECT__"});
+                }
+            }
+            numClients = (int)clients.size();
+            st = clients.empty() ? NetState::Listening : NetState::Connected;
         }
     }
+
+    for (auto& c : clients) {
+        if (!c.wbuf.empty()) {
+#ifdef __APPLE__
+            ::send(c.fd, c.wbuf.data(), c.wbuf.size(), 0);
+#else
+            ::send(c.fd, c.wbuf.data(), c.wbuf.size(), MSG_NOSIGNAL);
+#endif
+        }
+        ::close(c.fd);
+    }
     ::close(ls);
-    if (fd < 0) return; // cancelled
-    ioLoop(fd);
+    clients.clear();
+    numClients = 0;
 }
 
 void NetPeer::runJoin(std::string address, int port) {
@@ -126,15 +281,22 @@ void NetPeer::runJoin(std::string address, int port) {
 void NetPeer::ioLoop(int fd) {
     setNonBlocking(fd);
     int one = 1;
+#ifdef __APPLE__
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+#endif
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
     st = NetState::Connected;
+    numClients = 1;
 
     std::string rbuf, wbuf;
     char tmp[2048];
     auto drainOutbox = [&] {
         std::lock_guard<std::mutex> l(mu);
-        while (!outbox.empty()) { wbuf += outbox.front(); wbuf += '\n'; outbox.pop_front(); }
+        while (!outbox.empty()) {
+            wbuf += outbox.front().line;
+            wbuf += '\n';
+            outbox.pop_front();
+        }
     };
     while (!stop) {
         drainOutbox();
@@ -142,7 +304,11 @@ void NetPeer::ioLoop(int fd) {
         int pr = ::poll(&p, 1, 20);
         if (pr < 0 && errno != EINTR) { fail(NetState::Failed, "network error"); break; }
         if (pr > 0 && (p.revents & POLLOUT)) {
+#ifdef __APPLE__
             ssize_t n = ::send(fd, wbuf.data(), wbuf.size(), 0);
+#else
+            ssize_t n = ::send(fd, wbuf.data(), wbuf.size(), MSG_NOSIGNAL);
+#endif
             if (n > 0) wbuf.erase(0, (size_t)n);
             else if (n < 0 && errno != EAGAIN && errno != EINTR) { fail(NetState::Failed, "connection lost"); break; }
         }
@@ -159,7 +325,7 @@ void NetPeer::ioLoop(int fd) {
                     std::string line = rbuf.substr(0, pos);
                     rbuf.erase(0, pos + 1);
                     if (!line.empty() && line.back() == '\r') line.pop_back();
-                    if (!line.empty()) inbox.push_back(std::move(line));
+                    if (!line.empty()) inbox.push_back({0, std::move(line)});
                 }
             }
             if (rbuf.size() > kMaxLine) { fail(NetState::Failed, "protocol error (line too long)"); break; }
@@ -168,9 +334,14 @@ void NetPeer::ioLoop(int fd) {
     // best-effort flush of a final message (e.g. BYE) when we are the one closing
     if (st == NetState::Connected) {
         drainOutbox();
+#ifdef __APPLE__
         if (!wbuf.empty()) ::send(fd, wbuf.data(), wbuf.size(), 0);
+#else
+        if (!wbuf.empty()) ::send(fd, wbuf.data(), wbuf.size(), MSG_NOSIGNAL);
+#endif
     }
     ::close(fd);
+    numClients = 0;
 }
 
 std::vector<std::string> NetPeer::localAddresses() {
