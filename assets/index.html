@@ -1,235 +1,130 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0b1020">
-<title>Wing It - Upload a model</title>
-<style>
-  :root {
-    --bg: #0b1020;
-    --card: #141b30;
-    --line: #26304d;
-    --text: #e8ecf6;
-    --muted: #8d97b3;
-    --accent: #4f9cff;
-    --accent-2: #7cc4ff;
-    --ok: #3ccf8e;
-    --err: #ff6b6b;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: radial-gradient(1200px 600px at 20% -10%, #1b2a52 0%, transparent 60%), var(--bg);
-    color: var(--text);
-    display: flex;
-    justify-content: center;
-    padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
-    -webkit-text-size-adjust: 100%;
-  }
-  main { width: 100%; max-width: 440px; }
-  header { margin: 8px 4px 20px; }
-  .brand { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-2); font-weight: 600; }
-  h1 { font-size: 26px; margin: 6px 0 6px; font-weight: 700; }
-  .sub { color: var(--muted); font-size: 15px; line-height: 1.45; margin: 0; }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 18px;
-    box-shadow: 0 10px 30px rgba(0,0,0,.25);
-  }
-  .drop {
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
-    min-height: 180px; padding: 20px; text-align: center;
-    border: 2px dashed var(--line); border-radius: 14px; cursor: pointer;
-    transition: border-color .15s, background .15s;
-  }
-  .drop:active, .drop.over { border-color: var(--accent); background: rgba(79,156,255,.06); }
-  .drop svg { width: 44px; height: 44px; color: var(--accent); }
-  .drop .big { font-size: 17px; font-weight: 600; }
-  .drop .small { font-size: 13px; color: var(--muted); }
-  input[type=file] { display: none; }
-  .file {
-    display: none; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px;
-    background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 12px;
-  }
-  .file.show { display: flex; }
-  .file .name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file .size { color: var(--muted); font-size: 13px; white-space: nowrap; }
-  button {
-    width: 100%; margin-top: 14px; padding: 15px; border: 0; border-radius: 12px;
-    font-size: 17px; font-weight: 600; color: #fff; background: var(--accent);
-    -webkit-tap-highlight-color: transparent; cursor: pointer;
-  }
-  button:disabled { opacity: .45; cursor: default; }
-  button.secondary { background: transparent; border: 1px solid var(--line); color: var(--text); }
-  .progress { display: none; margin-top: 16px; }
-  .progress.show { display: block; }
-  .bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
-  .bar > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .15s; }
-  .progress .label { display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; color: var(--muted); }
-  .status { display: none; margin-top: 16px; padding: 14px; border-radius: 12px; font-size: 15px; line-height: 1.4; }
-  .status.show { display: block; }
-  .status.ok { background: rgba(60,207,142,.12); border: 1px solid rgba(60,207,142,.4); }
-  .status.err { background: rgba(255,107,107,.1); border: 1px solid rgba(255,107,107,.4); }
-  .status strong { display: block; margin-bottom: 2px; }
-  .status.ok strong { color: var(--ok); }
-  .status.err strong { color: var(--err); }
-  footer { margin: 18px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Scan File</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .upload-label {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            width: 200px;
+            height: 200px;
+            font-size: 120px;
+            color: #fff;
+            background-color: #333;
+            border-radius: 50%;
+            cursor: pointer;
+            margin: 20px auto;
+            transition: background-color 0.3s;
+            user-select: none;
+        }
+        .upload-label:hover {
+            background-color: #444;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        button {
+            background-color: #888;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 18px;
+            margin-top: 30px;
+        }
+        button:hover {
+            background-color: #999;
+        }
+        #message {
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        #fileName {
+            margin-top: 10px;
+            color: #aaa;
+            font-size: 14px;
+        }
+    </style>
 </head>
 <body>
-<main>
-  <header>
-    <div class="brand">Wing It &middot; Wind tunnel</div>
-    <h1>Send a model</h1>
-    <p class="sub">Pick a 3D model on this phone and it will show up in the app under <em>My models</em>.</p>
-  </header>
-
-  <section class="card">
-    <label class="drop" id="drop" for="file">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-      </svg>
-      <span class="big">Choose a model file</span>
-      <span class="small">.obj, .stl or .ply &middot; up to 64 MB</span>
-    </label>
-    <!-- no strict accept filter: iOS greys out .stl/.ply files with unknown types. The server checks the type. -->
-    <input type="file" id="file" name="scan_file">
-
-    <div class="file" id="fileRow">
-      <div class="name" id="fileName"></div>
-      <div class="size" id="fileSize"></div>
+    <div class="container">
+        <form id="uploadForm">
+            <label for="fileInput" class="upload-label">+</label>
+            <input type="file" id="fileInput" name="scan_file" required>
+            <div id="fileName"></div>
+            <br>
+            <button type="submit">Upload</button>
+        </form>
+        <div id="message"></div>
     </div>
 
-    <button id="upload" disabled>Upload</button>
+    <script>
+        const form = document.getElementById('uploadForm');
+        const message = document.getElementById('message');
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDisplay = document.getElementById('fileName');
 
-    <div class="progress" id="progress">
-      <div class="bar"><div id="barFill"></div></div>
-      <div class="label"><span id="progText">Uploading...</span><span id="progPct">0%</span></div>
-    </div>
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                fileNameDisplay.textContent = fileInput.files[0].name;
+            } else {
+                fileNameDisplay.textContent = '';
+            }
+        });
 
-    <div class="status" id="status"></div>
-  </section>
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            message.textContent = 'Uploading...';
+            
+            const file = fileInput.files[0];
+            if (!file) {
+                message.textContent = 'Please select a file first.';
+                message.style.color = 'red';
+                return;
+            }
 
-  <footer>Keep this phone on the same Wi-Fi as the computer running Wing It.</footer>
-</main>
+            const formData = new FormData();
+            formData.append('scan_file', file);
 
-<script>
-(function () {
-  var MAX = 64 * 1024 * 1024;
-  var OK_EXT = ['obj', 'stl', 'ply'];
-  var input = document.getElementById('file');
-  var drop = document.getElementById('drop');
-  var btn = document.getElementById('upload');
-  var fileRow = document.getElementById('fileRow');
-  var progress = document.getElementById('progress');
-  var barFill = document.getElementById('barFill');
-  var progText = document.getElementById('progText');
-  var progPct = document.getElementById('progPct');
-  var statusEl = document.getElementById('status');
-  var chosen = null, busy = false;
-
-  function fmtSize(n) {
-    if (n < 1024) return n + ' B';
-    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-    return (n / 1024 / 1024).toFixed(1) + ' MB';
-  }
-  function ext(name) { var i = name.lastIndexOf('.'); return i < 0 ? '' : name.slice(i + 1).toLowerCase(); }
-  function showStatus(kind, title, msg) {
-    statusEl.className = 'status show ' + kind;
-    statusEl.innerHTML = '';
-    var t = document.createElement('strong'); t.textContent = title;
-    var m = document.createElement('span'); m.textContent = msg;
-    statusEl.appendChild(t); statusEl.appendChild(m);
-  }
-  function hideStatus() { statusEl.className = 'status'; }
-
-  function choose(f) {
-    hideStatus();
-    chosen = null;
-    btn.disabled = true;
-    btn.textContent = 'Upload';
-    btn.classList.remove('secondary');
-    if (!f) { fileRow.classList.remove('show'); return; }
-    document.getElementById('fileName').textContent = f.name;
-    document.getElementById('fileSize').textContent = fmtSize(f.size);
-    fileRow.classList.add('show');
-    if (OK_EXT.indexOf(ext(f.name)) < 0) {
-      showStatus('err', 'Unsupported file', 'Please choose a .obj, .stl or .ply file.');
-      return;
-    }
-    if (f.size > MAX) {
-      showStatus('err', 'File too large', 'The limit is 64 MB. Try exporting a simpler mesh.');
-      return;
-    }
-    if (f.size === 0) {
-      showStatus('err', 'Empty file', 'That file has no data.');
-      return;
-    }
-    chosen = f;
-    btn.disabled = false;
-  }
-
-  input.addEventListener('change', function () { choose(input.files && input.files[0]); });
-  ['dragenter', 'dragover'].forEach(function (ev) {
-    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); });
-  });
-  ['dragleave', 'drop'].forEach(function (ev) {
-    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); });
-  });
-  drop.addEventListener('drop', function (e) { if (e.dataTransfer.files.length) choose(e.dataTransfer.files[0]); });
-
-  btn.addEventListener('click', function () {
-    if (busy) return;
-    if (!chosen) { input.click(); return; } // "Upload another" path
-    busy = true;
-    btn.disabled = true;
-    hideStatus();
-    progress.classList.add('show');
-    barFill.style.width = '0%';
-    progPct.textContent = '0%';
-    progText.textContent = 'Uploading...';
-
-    var fd = new FormData();
-    fd.append('scan_file', chosen, chosen.name);
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', '/upload');
-    xhr.timeout = 5 * 60 * 1000;
-    xhr.upload.onprogress = function (e) {
-      if (!e.lengthComputable) return;
-      var pct = Math.round(e.loaded / e.total * 100);
-      barFill.style.width = pct + '%';
-      progPct.textContent = pct + '%';
-      if (pct >= 100) progText.textContent = 'Checking the model...';
-    };
-    function done(ok, title, msg) {
-      busy = false;
-      progress.classList.remove('show');
-      showStatus(ok ? 'ok' : 'err', title, msg);
-      if (ok) {
-        chosen = null;
-        input.value = '';
-        btn.disabled = false;
-        btn.textContent = 'Upload another';
-        btn.classList.add('secondary');
-      } else {
-        btn.disabled = !chosen;
-      }
-    }
-    xhr.onload = function () {
-      var text = (xhr.responseText || '').trim();
-      if (xhr.status === 200) done(true, 'Uploaded!', (text || 'Your model') + ' is now in the app under My models.');
-      else if (xhr.status === 413) done(false, 'File too large', 'The limit is 64 MB.');
-      else done(false, 'Upload failed', text || ('Server error ' + xhr.status + '.'));
-    };
-    xhr.onerror = function () { done(false, 'Connection lost', 'Couldn\'t reach the computer. Is it still on the same Wi-Fi with the app open?'); };
-    xhr.ontimeout = function () { done(false, 'Timed out', 'The upload took too long. Try again on a stronger connection.'); };
-    xhr.send(fd);
-  });
-})();
-</script>
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    message.textContent = 'File uploaded successfully!';
+                    message.style.color = 'lightgreen';
+                } else {
+                    message.textContent = (await response.text()) || 'Failed to upload file.';
+                    message.style.color = 'red';
+                }
+            } catch (error) {
+                message.textContent = 'Error occurred during upload.';
+                message.style.color = 'red';
+                console.error(error);
+            }
+        });
+    </script>
 </body>
 </html>
