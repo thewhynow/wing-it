@@ -8,11 +8,13 @@ enum AppScreen {
     APP_SCREEN_WELCOME,
     APP_SCREEN_SELECT_MODEL,
     APP_SCREEN_UI,
-    // 2-player battle mode (src/ui/multiplayer.cpp)
+    // 2-player battle mode (src/ui/multiplayer.cpp). MP screens must stay LAST and contiguous: ui_loop routes
+    // screen >= APP_SCREEN_MP_LOBBY to mpDrawUi, which overwrites app.screen from the match phase.
     APP_SCREEN_MP_LOBBY,
     APP_SCREEN_MP_PICK,
     APP_SCREEN_MP_BATTLE,
     APP_SCREEN_MP_RESULT,
+    APP_SCREEN_MP_HALFTIME, // battle paused at 50%: re-rotate, then resume
 };
 
 struct AppState {
@@ -37,6 +39,7 @@ struct UiState {
     bool modelChanged = false; // set when a slider is let go, main re-voxelizes
     int gridSize = 80; // tunnel is 2n long and n x n across
     bool showColors = true, showLines = true;
+    bool mpShowLines = true; // streamlines in the multiplayer battle (local view pref, separate from showLines)
     std::vector<std::string> models; // .obj files in assets/models
     bool modelChosen = false; // set by Start, main loads models[model]
     std::string modelError;
