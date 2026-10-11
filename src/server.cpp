@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "models.hpp"
 #include "httplib.h"
 #include "qrcodegen.hpp"
 #include <iostream>
@@ -7,6 +8,9 @@
 #include <fstream>
 #include <string>
 #include <cstring>
+#include <filesystem>
+#include <mutex>
+#include <vector>
 
 #ifdef _WIN32
 #else
@@ -22,7 +26,7 @@ using namespace qrcodegen;
 static std::thread server_thread;
 static httplib::Server svr;
 
-std::string get_local_ip() {
+static std::string get_local_ip() {
     std::string ip = "127.0.0.1";
 #ifdef _WIN32
     WSADATA wsaData;
@@ -60,7 +64,7 @@ std::string get_local_ip() {
     return ip;
 }
 
-void print_qr(const QrCode& qr) {
+static void print_qr(const QrCode& qr) {
     int border = 2;
     for (int y = -border; y < qr.getSize() + border; y += 2) {
         std::cout << "\033[47;30m";
@@ -82,57 +86,113 @@ void print_qr(const QrCode& qr) {
     }
 }
 
+namespace {
+std::mutex gMu;                       // guards everything below
+std::string gUrl, gError;
+bool gHasLan = false;
+std::vector<std::string> gNewUploads; // drained by serverTakeUploads()
+std::atomic<bool> gListening{false}, gStopping{false};
+
+void setError(const std::string& e) { std::lock_guard<std::mutex> l(gMu); gError = e; }
+
+std::string readIndexHtml() {
+    std::ifstream file("assets/index.html", std::ios::binary);
+    if (!file) return "";
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+} // namespace
+
+std::string serverUrl() { std::lock_guard<std::mutex> l(gMu); return gUrl; }
+bool serverHasLan() { std::lock_guard<std::mutex> l(gMu); return gHasLan; }
+bool serverListening() { return gListening; }
+std::string serverError() { std::lock_guard<std::mutex> l(gMu); return gError; }
+std::vector<std::string> serverTakeUploads() {
+    std::lock_guard<std::mutex> l(gMu);
+    std::vector<std::string> out;
+    out.swap(gNewUploads);
+    return out;
+}
+
 void start_server_thread() {
-    server_thread = std::thread([]() {
-        std::string ip = get_local_ip();
-        std::string url = "http://" + ip + ":8081";
-        
-        try {
-            QrCode qr = QrCode::encodeText(url.c_str(), QrCode::Ecc::LOW);
-            std::cout << "Scan this QR code from your mobile device to upload files:\n\n";
-            print_qr(qr);
-        } catch (const std::exception& e) {
-            std::cout << "Failed to generate QR Code: " << e.what() << "\n";
+    std::string ip = get_local_ip();
+    std::string url = "http://" + ip + ":" + std::to_string(kUploadPort);
+    {
+        std::lock_guard<std::mutex> l(gMu);
+        gUrl = url;
+        gHasLan = ip != "127.0.0.1";
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(kUploadDir, ec);
+
+    try {
+        QrCode qr = QrCode::encodeText(url.c_str(), QrCode::Ecc::LOW);
+        std::cout << "Scan this QR code from your mobile device to upload files (" << url << "):\n\n";
+        print_qr(qr);
+    } catch (const std::exception& e) {
+        std::cout << "Failed to generate QR Code: " << e.what() << "\n";
+    }
+
+    svr.set_payload_max_length(kMaxModelBytes + (1u << 20)); // + room for the multipart framing
+
+    svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
+        std::string content = readIndexHtml();
+        if (!content.empty()) {
+            res.set_header("Cache-Control", "no-store");
+            res.set_content(content, "text/html; charset=utf-8");
+        } else {
+            res.status = 404;
+            res.set_content("index.html not found (Make sure it is in the assets/ directory)", "text/plain");
         }
+    });
 
-        svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-            std::ifstream file("assets/index.html");
-            if (file.is_open()) {
-                std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-                res.set_content(content, "text/html");
-            } else {
-                res.status = 404;
-                res.set_content("index.html not found (Make sure it is in the assets/ directory)", "text/plain");
-            }
-        });
+    svr.Post("/upload", [](const httplib::Request& req, httplib::Response& res) {
+        if (!req.form.has_file("scan_file")) {
+            res.status = 400;
+            res.set_content("No file was sent.", "text/plain");
+            return;
+        }
+        const auto& file = req.form.get_file("scan_file");
+        std::string err;
+        // sanitizes the name (no path traversal), checks size + extension, validates the mesh, never overwrites
+        std::string id = modelsImportBytes(file.filename, file.content.data(), file.content.size(), err);
+        if (id.empty()) {
+            std::cout << "Rejected upload '" << file.filename << "': " << err << "\n";
+            res.status = 422;
+            res.set_content(err, "text/plain");
+            return;
+        }
+        std::cout << "Received model: " << id << " (" << file.content.size() << " bytes)\n";
+        {
+            std::lock_guard<std::mutex> l(gMu);
+            gNewUploads.push_back(id);
+        }
+        res.status = 200;
+        res.set_content(modelLabel(id), "text/plain");
+    });
 
-        svr.Post("/upload", [](const httplib::Request& req, httplib::Response& res) {
-            if (req.form.has_file("scan_file")) {
-                const auto& file = req.form.get_file("scan_file");
-                
-                std::string filename = "uploads/" + file.filename;
-                std::ofstream ofs(filename, std::ios::binary);
-                if (ofs.is_open()) {
-                    ofs.write(file.content.data(), file.content.size());
-                    ofs.close();
-                    std::cout << "Successfully uploaded file: " << filename << " (" << file.content.size() << " bytes)\n";
-                    res.status = 200;
-                    res.set_content("Success", "text/plain");
-                } else {
-                    res.status = 500;
-                    res.set_content("Failed to save file (Make sure uploads/ directory exists)", "text/plain");
-                }
-            } else {
-                res.status = 400;
-                res.set_content("No scan_file provided", "text/plain");
-            }
-        });
+    // httplib answers oversized bodies with 413 before our handler runs - give it a readable message
+    svr.set_error_handler([](const httplib::Request&, httplib::Response& res) {
+        if (!res.body.empty()) return;
+        if (res.status == 413)
+            res.set_content("The file is too large (max " + std::to_string(kMaxModelBytes >> 20) + " MB).", "text/plain");
+        else
+            res.set_content("Error " + std::to_string(res.status), "text/plain");
+    });
 
-        svr.listen("0.0.0.0", 8081);
+    server_thread = std::thread([]() {
+        if (!svr.bind_to_port("0.0.0.0", kUploadPort)) {
+            setError("Couldn't open port " + std::to_string(kUploadPort) + " (is another copy of the app running?)");
+            std::cout << "Upload server: couldn't bind port " << kUploadPort << "\n";
+            return;
+        }
+        gListening = true;
+        if (!gStopping) svr.listen_after_bind();
+        gListening = false;
     });
 }
 
 void stop_server_thread() {
+    gStopping = true;
     svr.stop();
     if (server_thread.joinable()) {
         server_thread.join();

@@ -3,8 +3,10 @@
 #include <string>
 #include "common.hpp"
 
-/* load an OBJ into `out` (triangulated, degenerate tris dropped, normals computed). false on failure */
-bool loadMesh(const std::string& path, TriMesh& out);
+/* load an .obj / .stl (ascii or binary) / .ply (ascii or binary) into `out` (triangulated, degenerate tris
+ * dropped, normals computed). meshes over 65535 vertices are simplified by vertex clustering to fit the uint16
+ * indices. false on failure, with a human-readable reason in *err. thread-safe (no globals) */
+bool loadMesh(const std::string& path, TriMesh& out, std::string* err = nullptr);
 
 /* up-axis fix, center, rotate by aoaDeg, scale and place at (nx/4, ny/2, nz/2). result is in grid cells */
 void fitToGrid(TriMesh& mesh, const Grid& grid, float aoaDeg, bool zUp);

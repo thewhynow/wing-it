@@ -37,7 +37,7 @@ struct UiState {
     bool modelChanged = false; // set when a slider is let go, main re-voxelizes
     int gridSize = 80; // tunnel is 2n long and n x n across
     bool showColors = true, showLines = true;
-    std::vector<std::string> models; // .obj files in assets/models
+    std::vector<std::string> models; // model IDs (paths) from modelsList(); rebuild with modelLibraryRefresh()
     bool modelChosen = false; // set by Start, main loads models[model]
     std::string modelError;
 };

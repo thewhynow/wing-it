@@ -68,7 +68,14 @@ FetchContent_Declare(cpp-httplib
     GIT_PROGRESS TRUE
 )
 
-FetchContent_MakeAvailable(raylib glm imgui implot rlimgui tinyobjloader qrcodegen cpp-httplib)
+# Native "open file" dialog (header-only; osascript on macOS, zenity/kdialog on Linux, Win32 on Windows)
+FetchContent_Declare(pfd
+  GIT_REPOSITORY https://github.com/samhocevar/portable-file-dialogs.git
+  GIT_TAG        c12ea8c9a727f5320a2b4570aee863bbede2a204
+  SOURCE_SUBDIR  _none
+  GIT_PROGRESS    TRUE)
+
+FetchContent_MakeAvailable(raylib glm imgui implot rlimgui tinyobjloader qrcodegen cpp-httplib pfd)
 
 # Dear ImGui + ImPlot + rlImGui as one static lib
 add_library(imgui_lib STATIC
@@ -115,7 +122,7 @@ add_executable(wing_it ${APP_SOURCES}
   ${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc
 ${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
         src/common.cpp)  # defines TINYOBJLOADER_IMPLEMENTATION - do not define it in src/
-target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR} ${qrcodegen_SOURCE_DIR}/cpp)
+target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR} ${qrcodegen_SOURCE_DIR}/cpp ${pfd_SOURCE_DIR})
 target_link_libraries(wing_it PRIVATE raylib imgui_lib glm::glm Threads::Threads httplib::httplib)
 if(OpenMP_CXX_FOUND)
   target_link_libraries(wing_it PRIVATE OpenMP::OpenMP_CXX)

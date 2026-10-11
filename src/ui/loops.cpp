@@ -10,6 +10,7 @@
 #include "ui.hpp"
 #include "title.hpp"
 #include "models.hpp"
+#include "model_library.hpp"
 #include "solver.hpp"
 #include <implot.h>
 #include "multiplayer.hpp"
@@ -47,6 +48,7 @@ void ui_loop(AppState& appState, UiState& uiState) {
 
 
     rlImGuiBegin();
+    modelLibraryFrame(uiState, appState.screen == APP_SCREEN_SELECT_MODEL || appState.screen == APP_SCREEN_MP_PICK);
 
     // --- 1. Frame Counter (Top-Left Corner of Screen) ---
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
@@ -77,13 +79,13 @@ void ui_loop(AppState& appState, UiState& uiState) {
             ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_AlwaysAutoResize);
 
-        if (ImGui::BeginListBox("##models", ImVec2(260, 0))) {
-            for (int i = 0; i < (int)uiState.models.size(); ++i)
-                if (ImGui::Selectable(modelLabel(uiState.models[i]).c_str(), uiState.model == i, ImGuiSelectableFlags_AllowDoubleClick)
-                    && (uiState.model = i, ImGui::IsMouseDoubleClicked(0)))
-                    uiState.modelChosen = true;
-            ImGui::EndListBox();
-        }
+        // model library: grouped list + add-from-disk / drag-and-drop / phone upload (model_library.hpp)
+        std::string sel = uiState.models.empty() ? "" : uiState.models[uiState.model];
+        bool activated = false;
+        modelLibraryList("##models", uiState, sel, ImVec2(300, 260), &activated);
+        if (modelLibraryControls(uiState, sel)) uiState.modelError.clear();
+        if (int i = modelIndexOf(uiState, sel); i >= 0) uiState.model = i;
+        if (activated) uiState.modelChosen = true;
         if (!uiState.modelError.empty())
             ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "%s", uiState.modelError.c_str());
         if (ImGui::Button("Back"))
@@ -92,7 +94,7 @@ void ui_loop(AppState& appState, UiState& uiState) {
         if (ImGui::Button("Multiplayer")) // MP: 2-player battle
             mpEnter(appState);
         ImGui::SameLine();
-        if (ImGui::Button("Start", ImVec2(-FLT_MIN, 0)) || IsKeyPressed(KEY_ENTER))
+        if (ImGui::Button("Start", ImVec2(-FLT_MIN, 0)) || (IsKeyPressed(KEY_ENTER) && !modelLibraryModalOpen()))
             uiState.modelChosen = !uiState.models.empty();
 
         ImGui::End();
