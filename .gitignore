@@ -3,3 +3,6 @@ build/
 .idea/
 uploads/*
 !uploads/.gitkeep
+# local secrets, never commit
+*.key
+.wing-it/

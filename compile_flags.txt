@@ -9,6 +9,7 @@
 -Ibuild/_deps/tinyobjloader-src
 -Ibuild/_deps/cpp-httplib-src
 -Ibuild/_deps/qrcodegen-src/cpp
+-Ibuild/_deps/json-src/include
 -I/opt/homebrew/opt/libomp/include
 -DNO_FONT_AWESOME
 -fopenmp

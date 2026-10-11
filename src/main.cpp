@@ -15,6 +15,7 @@
 #include "server.hpp"
 #include "models.hpp"
 #include "style.hpp"
+#include "settings.hpp"
 
 ImFont* bodyFont = nullptr;
 
@@ -26,6 +27,7 @@ int main() {
     InitWindow(appState->window.width, appState->window.height, "wing-it  -  wind tunnel");
     rlImGuiSetup(true);
     titleInit();
+    settingsLoad();
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));

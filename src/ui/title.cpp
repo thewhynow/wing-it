@@ -78,7 +78,7 @@ Layout layout() {
     L.subY = L.titleY + 68.0f;
     L.view = {0.0f, 0.0f, L.W, L.H};
     L.readY = L.H - 24.0f;
-    L.menuY = L.H - 112.0f;
+    L.menuY = L.H - 152.0f; // room for two rows of buttons above the footer
     L.footY = L.H - 44.0f;
     return L;
 }
@@ -109,6 +109,7 @@ void cornerMarks(ImDrawList *dl, Box b, float len, ImU32 col) {
 }
 
 int gMenuIndex = 0;
+bool gMenuNewRow = false;
 
 } // namespace
 
@@ -251,6 +252,7 @@ void titleDraw() {
 void titleMenuBegin() {
     const Layout L = layout();
     gMenuIndex = 0;
+    gMenuNewRow = false;
     ImGui::SetNextWindowPos(ImVec2(L.W * 0.5f, L.menuY), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0f);
@@ -270,7 +272,8 @@ bool titleMenuButton(const char *label) {
     if (vis != label && hash == std::string::npos) vis += std::string("###") + label;
 
     const bool primary = gMenuIndex++ == 0;
-    if (!primary) ImGui::SameLine();
+    if (!primary && !gMenuNewRow) ImGui::SameLine();
+    gMenuNewRow = false;
     const ImVec4 accent = ImGui::ColorConvertU32ToFloat4(pro::kAccent);
     if (primary) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(accent.x * 0.85f, accent.y * 0.85f, accent.z * 0.85f, 1.0f));
@@ -288,6 +291,11 @@ bool titleMenuButton(const char *label) {
     const bool pressed = ImGui::Button(vis.c_str(), ImVec2(196, 40));
     ImGui::PopStyleColor(5);
     return pressed;
+}
+
+void titleMenuNewRow() {
+    ImGui::Dummy(ImVec2(0, 8));
+    gMenuNewRow = true;
 }
 
 void titleMenuEnd() {

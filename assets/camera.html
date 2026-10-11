@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Take a Photo</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #000; color: #fff; margin: 0; min-height: 100vh;
+               display: flex; justify-content: center; align-items: center; }
+        .container { text-align: center; display: flex; flex-direction: column; align-items: center; padding: 20px; max-width: 420px; }
+        h1 { font-size: 20px; margin: 0 0 6px; }
+        p.sub { color: #aaa; font-size: 14px; margin: 0 0 10px; }
+        .cam-label { display: inline-flex; justify-content: center; align-items: center; width: 180px; height: 180px;
+                     font-size: 80px; background: #333; border-radius: 50%; cursor: pointer; margin: 20px auto;
+                     user-select: none; }
+        .cam-label:active { background: #444; }
+        input[type="file"] { display: none; }
+        #preview { max-width: 100%; max-height: 50vh; border-radius: 8px; display: none; margin: 10px 0; }
+        button { background: #3b82c4; color: #fff; border: none; padding: 15px 30px; border-radius: 4px; cursor: pointer;
+                 font-size: 18px; margin-top: 14px; }
+        button.secondary { background: #555; }
+        button:disabled { opacity: .5; }
+        #bar { width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden; display: none; margin-top: 14px; }
+        #fill { height: 100%; width: 0; background: #3b82c4; transition: width .2s; }
+        #fill.indet { width: 35%; animation: slide 1.1s ease-in-out infinite alternate; }
+        @keyframes slide { from { margin-left: 0 } to { margin-left: 65% } }
+        #message { margin-top: 14px; font-weight: bold; min-height: 22px; }
+        .ok { color: lightgreen } .err { color: #ff6b6b } .info { color: #9cc9f0 }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Photo to 3D model</h1>
+        <p class="sub" id="sub">Take a picture of an object - keep it centred and fill the frame.</p>
+        <label for="cam" class="cam-label" id="camLabel">&#128247;</label>
+        <input type="file" id="cam" accept="image/*" capture="environment">
+        <img id="preview" alt="Your photo">
+        <div id="bar"><div id="fill"></div></div>
+        <div id="message"></div>
+        <button id="send" style="display:none">Send to computer</button>
+        <button id="retake" class="secondary" style="display:none">Retake</button>
+    </div>
+    <script>
+        const cam = document.getElementById('cam'), preview = document.getElementById('preview');
+        const sendBtn = document.getElementById('send'), retakeBtn = document.getElementById('retake');
+        const msg = document.getElementById('message'), bar = document.getElementById('bar'), fill = document.getElementById('fill');
+        const camLabel = document.getElementById('camLabel'), sub = document.getElementById('sub');
+        let blob = null, poll = null;
+
+        function say(t, cls) { msg.textContent = t; msg.className = cls || ''; }
+        function reset() {
+            blob = null; preview.style.display = 'none'; sendBtn.style.display = retakeBtn.style.display = 'none';
+            camLabel.style.display = ''; bar.style.display = 'none'; say(''); clearInterval(poll); cam.value = '';
+            sub.textContent = 'Take a picture of an object - keep it centred and fill the frame.';
+        }
+        retakeBtn.onclick = reset;
+
+        // phone photos are big (and often HEIC): redraw to a 1024px JPEG, which also keeps the upload quick
+        cam.addEventListener('change', async () => {
+            const f = cam.files[0];
+            if (!f) return;
+            say('Preparing photo...', 'info');
+            try {
+                const bmp = await createImageBitmap(f);
+                const s = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+                const c = document.createElement('canvas');
+                c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+                c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+                blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+                preview.src = URL.createObjectURL(blob);
+                preview.style.display = 'block'; camLabel.style.display = 'none';
+                sendBtn.style.display = retakeBtn.style.display = ''; sendBtn.disabled = false;
+                sub.textContent = 'Happy with it?';
+                say('');
+            } catch (e) { say("Couldn't read that photo - try again.", 'err'); }
+        });
+
+        sendBtn.onclick = () => {
+            if (!blob) return;
+            sendBtn.disabled = retakeBtn.disabled = true;
+            bar.style.display = 'block'; fill.classList.remove('indet'); fill.style.width = '0'; say('Sending...', 'info');
+            const fd = new FormData(); fd.append('photo', blob, 'photo.jpg');
+            const x = new XMLHttpRequest();
+            x.open('POST', '/photo');
+            x.upload.onprogress = e => { if (e.lengthComputable) fill.style.width = (100 * e.loaded / e.total) + '%'; };
+            x.onload = () => {
+                if (x.status === 200) {
+                    say('Photo sent! Press Generate on the computer.', 'ok'); fill.style.width = '100%';
+                    retakeBtn.disabled = false; retakeBtn.textContent = 'Take another';
+                    startPolling();
+                } else { say(x.responseText || 'Upload failed.', 'err'); sendBtn.disabled = retakeBtn.disabled = false; }
+            };
+            x.onerror = () => { say("Couldn't reach the computer - same Wi-Fi?", 'err'); sendBtn.disabled = retakeBtn.disabled = false; };
+            x.send(fd);
+        };
+
+        function startPolling() {
+            clearInterval(poll);
+            poll = setInterval(async () => {
+                try {
+                    const j = await (await fetch('/ai-status', { cache: 'no-store' })).json();
+                    if (j.phase === 'working') { fill.classList.add('indet'); say(j.text + ' (' + j.elapsed + 's)', 'info'); }
+                    else if (j.phase === 'done') { fill.classList.remove('indet'); fill.style.width = '100%'; say(j.text, 'ok'); clearInterval(poll); }
+                    else if (j.phase === 'failed') { fill.classList.remove('indet'); say(j.text, 'err'); clearInterval(poll); }
+                } catch (e) {}
+            }, 1500);
+        }
+    </script>
+</body>
+</html>

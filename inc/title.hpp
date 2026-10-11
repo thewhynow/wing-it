@@ -27,4 +27,5 @@ void titleDraw();      // page background, title, simulation viewport, readouts,
 // Buttons are laid out in one centred row under the viewport; the first one is the primary action.
 void titleMenuBegin();
 bool titleMenuButton(const char *label);
+void titleMenuNewRow(); // the next button starts a new row, left-aligned under the first
 void titleMenuEnd();

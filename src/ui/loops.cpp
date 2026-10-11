@@ -14,6 +14,7 @@
 #include "solver.hpp"
 #include <implot.h>
 #include "multiplayer.hpp"
+#include "settings_ui.hpp"
 #include "GLFW/glfw3.h"
 
 void time_thread(AppState& appState, std::atomic<bool>& running) {
@@ -33,7 +34,7 @@ void time_thread(AppState& appState, std::atomic<bool>& running) {
 }
 
 void key_loop(AppState& appState, UiState& uiState) {
-    if (ImGui::GetIO().WantTextInput) return; // typing in a text box (multiplayer name / IP) must not trigger hotkeys
+    if (ImGui::GetIO().WantTextInput || settingsUiModalOpen() || modelLibraryModalOpen()) return; // typing in a text box (multiplayer name / IP) must not trigger hotkeys
     if (IsKeyPressed(KEY_A)) {
         appState.shouldQuit = true;
         return;
@@ -69,9 +70,11 @@ void ui_loop(AppState& appState, UiState& uiState) {
     if (appState.screen == APP_SCREEN_WELCOME) {
         titleDraw();
         titleMenuBegin();
-        if (titleMenuButton("Start") || IsKeyPressed(KEY_ENTER))
+        if (titleMenuButton("Start") || (IsKeyPressed(KEY_ENTER) && !settingsUiModalOpen() && !ImGui::GetIO().WantTextInput))
             appState.screen = APP_SCREEN_SELECT_MODEL;
-        // add more title menu buttons here, e.g. if (titleMenuButton("Multiplayer")) ...
+        titleMenuNewRow();
+        if (titleMenuButton("Settings"))
+            settingsUiRequestOpen();
         titleMenuEnd();
     } else if (appState.screen == APP_SCREEN_SELECT_MODEL) {
         ImGui::SetNextWindowPos(screenCenter, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -102,6 +105,8 @@ void ui_loop(AppState& appState, UiState& uiState) {
     } else if (appState.screen >= APP_SCREEN_MP_LOBBY) {
         mpDrawUi(appState, uiState); // MP: lobby / pick / battle HUD / result
     }
+
+    settingsUiDraw(); // a modal, reachable from the title screen and from the photo-to-model window
 
     if (appState.screen != APP_SCREEN_UI) {
         rlImGuiEnd();

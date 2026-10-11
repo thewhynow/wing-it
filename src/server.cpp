@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "models.hpp"
+#include "ai.hpp"
 #include "httplib.h"
 #include "qrcodegen.hpp"
 #include <iostream>
@@ -91,12 +92,15 @@ std::mutex gMu;                       // guards everything below
 std::string gUrl, gError;
 bool gHasLan = false;
 std::vector<std::string> gNewUploads; // drained by serverTakeUploads()
+std::string gPhoto;                   // newest phone photo, drained by serverTakePhoto()
+bool gHasPhoto = false;
+constexpr size_t kMaxPhotoBytes = 12u << 20;
 std::atomic<bool> gListening{false}, gStopping{false};
 
 void setError(const std::string& e) { std::lock_guard<std::mutex> l(gMu); gError = e; }
 
-std::string readIndexHtml() {
-    std::ifstream file("assets/index.html", std::ios::binary);
+std::string readAsset(const char* path) {
+    std::ifstream file(path, std::ios::binary);
     if (!file) return "";
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
@@ -111,6 +115,15 @@ std::vector<std::string> serverTakeUploads() {
     std::vector<std::string> out;
     out.swap(gNewUploads);
     return out;
+}
+
+bool serverTakePhoto(std::string& jpeg) {
+    std::lock_guard<std::mutex> l(gMu);
+    if (!gHasPhoto) return false;
+    jpeg = std::move(gPhoto);
+    gPhoto.clear();
+    gHasPhoto = false;
+    return true;
 }
 
 void start_server_thread() {
@@ -135,7 +148,7 @@ void start_server_thread() {
     svr.set_payload_max_length(kMaxModelBytes + (1u << 20)); // + room for the multipart framing
 
     svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
-        std::string content = readIndexHtml();
+        std::string content = readAsset("assets/index.html");
         if (!content.empty()) {
             res.set_header("Cache-Control", "no-store");
             res.set_content(content, "text/html; charset=utf-8");
@@ -143,6 +156,51 @@ void start_server_thread() {
             res.status = 404;
             res.set_content("index.html not found (Make sure it is in the assets/ directory)", "text/plain");
         }
+    });
+
+    // phone camera page -> photo for the AI model generator
+    svr.Get("/camera", [](const httplib::Request&, httplib::Response& res) {
+        std::string content = readAsset("assets/camera.html");
+        if (content.empty()) {
+            res.status = 404;
+            res.set_content("camera.html not found (Make sure it is in the assets/ directory)", "text/plain");
+            return;
+        }
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(content, "text/html; charset=utf-8");
+    });
+
+    svr.Post("/photo", [](const httplib::Request& req, httplib::Response& res) {
+        if (!req.form.has_file("photo")) {
+            res.status = 400;
+            res.set_content("No photo was sent.", "text/plain");
+            return;
+        }
+        const auto& file = req.form.get_file("photo");
+        const std::string& d = file.content;
+        if (d.size() < 4 || (unsigned char)d[0] != 0xFF || (unsigned char)d[1] != 0xD8) {
+            res.status = 415;
+            res.set_content("That doesn't look like a JPEG photo.", "text/plain");
+            return;
+        }
+        if (d.size() > kMaxPhotoBytes) {
+            res.status = 413;
+            res.set_content("The photo is too large (max " + std::to_string(kMaxPhotoBytes >> 20) + " MB).", "text/plain");
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> l(gMu);
+            gPhoto = d;
+            gHasPhoto = true;
+        }
+        std::cout << "Received photo (" << d.size() << " bytes)\n";
+        res.set_content("ok", "text/plain");
+    });
+
+    // the phone page polls this to show how the computer is getting on
+    svr.Get("/ai-status", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(aiStatusJson(), "application/json");
     });
 
     svr.Post("/upload", [](const httplib::Request& req, httplib::Response& res) {

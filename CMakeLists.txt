@@ -68,6 +68,14 @@ FetchContent_Declare(cpp-httplib
     GIT_PROGRESS TRUE
 )
 
+# JSON for the Hack Club AI requests (header-only, fetch sources only)
+FetchContent_Declare(json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG        v3.11.3
+  GIT_SHALLOW    TRUE
+  SOURCE_SUBDIR  _none
+  GIT_PROGRESS    TRUE)
+
 # Native "open file" dialog (header-only; osascript on macOS, zenity/kdialog on Linux, Win32 on Windows)
 FetchContent_Declare(pfd
   GIT_REPOSITORY https://github.com/samhocevar/portable-file-dialogs.git
@@ -75,7 +83,10 @@ FetchContent_Declare(pfd
   SOURCE_SUBDIR  _none
   GIT_PROGRESS    TRUE)
 
-FetchContent_MakeAvailable(raylib glm imgui implot rlimgui tinyobjloader qrcodegen cpp-httplib pfd)
+FetchContent_MakeAvailable(raylib glm imgui implot rlimgui tinyobjloader qrcodegen cpp-httplib pfd json)
+
+# libcurl does the HTTPS calls to ai.hackclub.com (ships with macOS; Linux: libcurl4-openssl-dev)
+find_package(CURL REQUIRED)
 
 # Dear ImGui + ImPlot + rlImGui as one static lib
 add_library(imgui_lib STATIC
@@ -122,8 +133,8 @@ add_executable(wing_it ${APP_SOURCES}
   ${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc
 ${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
         src/common.cpp)  # defines TINYOBJLOADER_IMPLEMENTATION - do not define it in src/
-target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR} ${qrcodegen_SOURCE_DIR}/cpp ${pfd_SOURCE_DIR})
-target_link_libraries(wing_it PRIVATE raylib imgui_lib glm::glm Threads::Threads httplib::httplib)
+target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR} ${qrcodegen_SOURCE_DIR}/cpp ${pfd_SOURCE_DIR} ${json_SOURCE_DIR}/include)
+target_link_libraries(wing_it PRIVATE raylib imgui_lib glm::glm Threads::Threads httplib::httplib CURL::libcurl)
 if(OpenMP_CXX_FOUND)
   target_link_libraries(wing_it PRIVATE OpenMP::OpenMP_CXX)
 endif()
