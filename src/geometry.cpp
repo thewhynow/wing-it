@@ -30,14 +30,18 @@ bool loadMesh(const std::string& path, TriMesh& out){
             attrib.vertices[i + 2]
         );
 
+    /* indices are uint16_t, so anything bigger can't be addressed */
+    if (out.vertices.size() > UINT16_MAX)
+        return false;
+
     /* merge all the triangles into one list */
     for (const auto &shape : shapes){
         const auto &ids = shape.mesh.indices;
 
         for (size_t i = 0; i + 2 < ids.size(); i += 3){
-            uint32_t a = ids[i].vertex_index,
-                     b = ids[i + 1].vertex_index,
-                     c = ids[i + 2].vertex_index
+            uint16_t a = (uint16_t)ids[i].vertex_index,
+                     b = (uint16_t)ids[i + 1].vertex_index,
+                     c = (uint16_t)ids[i + 2].vertex_index
             ;
 
             /* check if the triangle has area (degenerate) */
@@ -62,7 +66,7 @@ bool loadMesh(const std::string& path, TriMesh& out){
 
     out.normals.assign(out.vertices.size(), glm::vec3{0.0f});
     for (size_t t = 0; t < out.indices.size(); t += 3){
-        uint32_t a = out.indices[t],
+        uint16_t a = out.indices[t],
                  b = out.indices[t + 1],
                  c = out.indices[t + 2]
         ;
