@@ -5,6 +5,13 @@
 
 struct AppState;
 
+// "shown" eases toward the latest trace every frame so lines don't jump between retraces
+struct Streamline {
+    std::vector<Vector3> target, shown;
+    std::vector<float> targetWidth, shownWidth; // ribbon width per point, from pressure
+    float presence = 0.0f, targetPresence = 0.0f; // fades lines in and out
+};
+
 struct Render3DState {
     float dist = 14.14f;
     float yaw = 0.0f;
@@ -17,10 +24,8 @@ struct Render3DState {
         .projection = CAMERA_PERSPECTIVE
     };
     Grid grid;
-    // First vector stores the Z of all the coordinates
-    // Inner vector stores all the coordinates
-    // vec2 stores X and Y positions
-    std::vector<std::vector<Vector2>> coords;
+    // one per seed on the inlet face (x = 0), in grid coords
+    std::vector<Streamline> lines;
 };
 
 void renderInit();

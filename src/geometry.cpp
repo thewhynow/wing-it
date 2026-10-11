@@ -136,7 +136,7 @@ void fitToGrid(TriMesh& mesh, const Grid& grid, float aoaDeg, bool zUp){
     float s = scaleToFit(mesh, grid);
 
     glm::vec3 target {
-        grid.nx / 4.0f,
+        grid.nx / 2.0f,
         grid.ny / 2.0f,
         grid.nz / 2.0f
     };
@@ -176,9 +176,9 @@ float scaleToFit(const TriMesh &mesh, const Grid &g){
      * the tightest one is the ratio we use to scale the entire model
      */
     float s = std::min({
-        0.30f * g.nx / extent.x,
-        0.35f * g.ny / extent.y,
-        0.30f * g.nz / extent.z
+        0.50f * g.nx / extent.x,
+        0.50f * g.ny / extent.y,
+        0.50f * g.nz / extent.z
     });
 
     /* fraction that the model's cross-section covers of the tunnel */

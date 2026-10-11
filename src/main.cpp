@@ -6,6 +6,7 @@
 #include "render.hpp"
 #include "ui.hpp"
 #include "geometry.hpp"
+#include "solver.hpp"
 
 ImFont* bodyFont = nullptr;
 
@@ -30,16 +31,6 @@ int main() {
 
     ImPlot::CreateContext();
     printf("got here! grid.nx: %d, grid.ny: %d\n", cameraState->grid.nx, cameraState->grid.ny);
-    // we need to start by creating a vertex at the middle of every element
-    std::vector<Vector2> morecoords;
-    morecoords.reserve(cameraState->grid.nx * cameraState->grid.ny);
-    for (int x = -(cameraState->grid.nx/2); x < cameraState->grid.nx - cameraState->grid.nx/2; x += 3) {
-        for (int y = -(cameraState->grid.ny/2); y < cameraState->grid.ny - cameraState->grid.ny/2; y += 3) {
-            morecoords.push_back(Vector2(x, y));
-        }
-    }
-    cameraState->coords.push_back(morecoords);
-    printf("got here! coords.size(): %d\n", (int)cameraState->coords.size());
 
     TriMesh mesh;
     bool success = loadMesh("./assets/models/monkey.obj", mesh);
@@ -48,7 +39,15 @@ int main() {
 
     fitToGrid(mesh, cameraState->grid, 0.0f, false);
     voxelize(mesh, cameraState->grid);
+    solverReset(cameraState->grid, uiState->params); // voxel_loop reads the flow, so it needs cells
     renderSetMesh(mesh);
+
+    // solver runs flat out on its own thread, the render thread just snapshots it
+    std::atomic<bool> solverRunning{true};
+    std::thread solverThread([&] {
+        while (solverRunning)
+            solverStep(cameraState->grid, uiState->params);
+    });
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
         BeginDrawing();
@@ -62,6 +61,8 @@ int main() {
 
     threadRunning = false;
     timerThread.join();
+    solverRunning = false;
+    solverThread.join();
 
     ImPlot::DestroyContext();
     rlImGuiShutdown();

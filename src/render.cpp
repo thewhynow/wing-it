@@ -9,6 +9,7 @@
     #include <GL/gl.h>
 #endif
 #include <math.h>
+#include <algorithm>
 #include "ui.hpp"
 #include "render.hpp"
 
@@ -32,87 +33,216 @@ void camera_loop(AppState& appState, Render3DState& cameraState) {
     DrawCircleV(GetMousePosition(), 5, DARKBLUE);
 }
 
-// one GPU vertex per cell, uploaded once and drawn as GL points
-static Mesh buildRow(const std::vector<Vector2>& coords, float z) {
-    Mesh mesh = {};
-    mesh.vertexCount = (int)coords.size();
-    mesh.vertices = (float*)MemAlloc(mesh.vertexCount * 3 * sizeof(float));
-
-    float* out = mesh.vertices;
-    for (const auto& c : coords) {
-        *out++ = c.x; *out++ = c.y; *out++ = z;
-    }
-
-    UploadMesh(&mesh, false);
-    return mesh;
-}
-
 static Model meshModel = {}; // uploaded once by renderSetMesh, drawn in voxel_loop
+
+// trilinear sample of the flow at grid position p (cell centres sit at i + 0.5). solid cells count as still air
+static void sampleFlow(const FlowField &f, const Grid &g, Vector3 p, Vector3 &vel, float &rho) {
+    float fx = p.x - 0.5f, fy = p.y - 0.5f, fz = p.z - 0.5f;
+    int x0 = (int)floorf(fx), y0 = (int)floorf(fy), z0 = (int)floorf(fz);
+    float tx = fx - x0, ty = fy - y0, tz = fz - z0;
+
+    vel = {0, 0, 0};
+    rho = 0.0f;
+    float rhoW = 0.0f;
+    for (int c = 0; c < 8; ++c) {
+        int dx = c & 1, dy = (c >> 1) & 1, dz = c >> 2;
+        int x = std::clamp(x0 + dx, 0, g.nx - 1),
+            y = std::clamp(y0 + dy, 0, g.ny - 1),
+            z = std::clamp(z0 + dz, 0, g.nz - 1);
+        float w = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty) * (dz ? tz : 1 - tz);
+
+        size_t idx = FlowField::cellIndex(g, x, y, z);
+        if (!g.solid.empty() && g.solid[idx])
+            continue;
+
+        vel = Vector3Add(vel, Vector3Scale({f.ux[idx], f.uy[idx], f.uz[idx]}, w));
+        rho += w * f.rho[idx];
+        rhoW += w;
+    }
+    rho = rhoW > 0.0f ? rho / rhoW : 1.0f;
+}
 
 void voxel_loop(AppState& appState, Render3DState& cameraState) {
     Grid &g = cameraState.grid;
-    static std::vector<Mesh> rows; // rows[k] is the mesh for coords[k]
+    auto &lines = cameraState.lines;
 
-    // raylib can't draw GL_POINTS from a mesh, so use a tiny flat-color shader and draw it ourselves
-    static Shader dotShader = LoadShaderFromMemory(
-        "#version 330\n"
-        "in vec3 vertexPosition; uniform mat4 mvp;\n"
-        "void main() { gl_Position = mvp * vec4(vertexPosition, 1.0); }\n",
-        "#version 330\n"
-        "uniform vec4 color; out vec4 finalColor;\n"
-        "void main() { finalColor = color; }\n");
-    static int mvpLoc = GetShaderLocation(dotShader, "mvp");
-    static int colorLoc = GetShaderLocation(dotShader, "color");
+    // the solver is always running, so retrace every streamline from a fresh snapshot a few times a second
+    static FlowField out; // static so the snapshot buffers aren't reallocated every frame
+    static int framesSinceTrace = 1 << 30;
+    if (++framesSinceTrace >= 30) {
+        framesSinceTrace = 0;
+        solverSnapshot(out);
 
-    // add a new z row each frame until there's one per grid cell in z
-    FlowField out;
-    if ((int)cameraState.coords.size() < g.nz) {
-        std::vector<Vector2> morecoords;
-        morecoords.reserve(g.nx * g.ny);
-        for (Vector2 c : cameraState.coords.back()) {
+        const float step = 0.5f; // in cells
+        const int maxSteps = 4 * (g.nx + g.ny + g.nz);
+        std::vector<std::vector<float>> rhos;
+        float rhoMin = 1e30f, rhoMax = -1e30f;
 
-            size_t idx = FlowField::cellIndex(g, static_cast<size_t>(c.x + g.nx / 2), static_cast<size_t>(c.y + g.ny / 2), static_cast<size_t>(cameraState.coords.back().size() - 1));
-            solverSnapshot(out);
-            printf("idx: %zu, length: %zu\n", idx, out.ux.size());
-            Vector2 mag = {out.ux[idx], out.uy[idx]};
-            morecoords.push_back(Vector2Add(c, mag));
+        size_t l = 0;
+        for (int sz = 1; sz < g.nz && !out.ux.empty(); sz += 3) {
+            for (int sy = 1; sy < g.ny; sy += 3, ++l) {
+                if (lines.size() <= l)
+                    lines.emplace_back();
+                Streamline &sl = lines[l];
+
+                Vector3 p = {0.5f, (float)sy, (float)sz};
+                Vector3 freeVel;
+                float r;
+                sampleFlow(out, g, p, freeVel, r);
+
+                sl.target.clear();
+                rhos.emplace_back();
+                bool interesting = false;
+
+                for (int s = 0; s < maxSteps; ++s) {
+                    Vector3 vel;
+                    sampleFlow(out, g, p, vel, r);
+                    sl.target.push_back(p);
+                    rhos.back().push_back(r);
+
+                    // only keep lines that get bent or sped up / slowed down by the model
+                    if (Vector3Distance(vel, freeVel) > 0.1f * Vector3Length(freeVel))
+                        interesting = true;
+
+                    float speed = Vector3Length(vel);
+                    if (speed < 1e-6f)
+                        break;
+                    p = Vector3Add(p, Vector3Scale(vel, step / speed)); // fixed step along the flow
+
+                    int x = (int)floorf(p.x), y = (int)floorf(p.y), z = (int)floorf(p.z);
+                    if (x < 0 || x >= g.nx || y < 0 || y >= g.ny || z < 0 || z >= g.nz)
+                        break;
+                    if (!g.solid.empty() && g.solid[FlowField::cellIndex(g, x, y, z)]) {
+                        interesting = true;
+                        break;
+                    }
+                }
+
+                sl.targetPresence = interesting && sl.target.size() > 1 ? 1.0f : 0.0f;
+                if (sl.targetPresence > 0.0f)
+                    for (float v : rhos.back()) {
+                        rhoMin = std::min(rhoMin, v);
+                        rhoMax = std::max(rhoMax, v);
+                    }
+            }
         }
-        cameraState.coords.push_back(morecoords);
+
+        // pressure is rho / 3 in LBM, so normalizing rho gives the same thin -> thick ramp
+        float range = rhoMax - rhoMin;
+        for (size_t i = 0; i < rhos.size(); ++i) {
+            Streamline &sl = lines[i];
+            sl.targetWidth.resize(rhos[i].size());
+            for (size_t p = 0; p < rhos[i].size(); ++p) {
+                float t = range > 1e-9f ? std::clamp((rhos[i][p] - rhoMin) / range, 0.0f, 1.0f) : 0.0f;
+                sl.targetWidth[p] = 0.15f + 1.1f * t;
+            }
+
+            // a brand new line starts on its target and just fades in
+            if (sl.shown.empty()) {
+                sl.shown = sl.target;
+                sl.shownWidth = sl.targetWidth;
+            }
+        }
     }
 
-    // upload rows that don't have a mesh yet. row 0 gets the lowest z, so it's furthest
-    // from the default camera (which sits on +z)
-    while (rows.size() < cameraState.coords.size()) {
-        int k = (int)rows.size();
-        rows.push_back(buildRow(cameraState.coords[k], (float)(k - g.nz/2)));
+    // ease shown toward target. a target that got shorter is padded with its end point so the tail pulls in
+    float ease = 1.0f - expf(-6.0f * GetFrameTime());
+    for (Streamline &sl : lines) {
+        if (sl.target.empty())
+            continue;
+        sl.presence += (sl.targetPresence - sl.presence) * ease;
+
+        size_t n = std::max(sl.shown.size(), sl.target.size());
+        while (sl.shown.size() < n) {
+            sl.shown.push_back(sl.shown.back());
+            sl.shownWidth.push_back(0.0f);
+        }
+        for (size_t p = 0; p < n; ++p) {
+            bool past = p >= sl.target.size();
+            Vector3 to = past ? sl.target.back() : sl.target[p];
+            float w = past ? 0.0f : sl.targetWidth[p];
+            sl.shown[p] = Vector3Lerp(sl.shown[p], to, ease);
+            sl.shownWidth[p] += (w - sl.shownWidth[p]) * ease;
+        }
+
+        // drop tail points once they've collapsed onto the end
+        while (sl.shown.size() > sl.target.size() && Vector3Distance(sl.shown.back(), sl.target.back()) < 0.01f) {
+            sl.shown.pop_back();
+            sl.shownWidth.pop_back();
+        }
     }
 
     BeginMode3D(cameraState.camera);
-    rlDrawRenderBatchActive(); // flush anything raylib queued so draw order stays right
 
-    Matrix mvp = MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection());
-    const float red[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
-    rlEnableShader(dotShader.id);
-    rlSetUniformMatrix(mvpLoc, mvp);
-    rlSetUniform(colorLoc, red, SHADER_UNIFORM_VEC4, 1);
-    glPointSize(2.0f);
-    for (const auto& row : rows) {
-        rlEnableVertexArray(row.vaoId);
-        glDrawArrays(GL_POINTS, 0, row.vertexCount);
+    // ribbons that always face the camera, since GL lines can't be thicker than 1px on macOS
+    Vector3 off = {-(float)(g.nx/2), -(float)(g.ny/2), -(float)(g.nz/2)}; // same offset the model gets
+    Vector3 cam = cameraState.camera.position;
+    rlDrawRenderBatchActive();
+    rlDisableBackfaceCulling();
+    rlBegin(RL_TRIANGLES);
+    rlColor4ub(SKYBLUE.r, SKYBLUE.g, SKYBLUE.b, 255);
+    for (const Streamline &sl : lines) {
+        if (sl.presence < 0.01f || sl.shown.size() < 2)
+            continue;
+
+        // half-width offset at each point, perpendicular to the line and the view direction
+        auto side = [&](size_t p) {
+            size_t a = p > 0 ? p - 1 : p, b = p + 1 < sl.shown.size() ? p + 1 : p;
+            Vector3 pos = Vector3Add(sl.shown[p], off);
+            Vector3 tangent = Vector3Subtract(sl.shown[b], sl.shown[a]);
+            Vector3 s = Vector3Normalize(Vector3CrossProduct(tangent, Vector3Subtract(cam, pos)));
+            return Vector3Scale(s, 0.5f * sl.shownWidth[p] * sl.presence);
+        };
+
+        Vector3 s0 = side(0);
+        for (size_t p = 0; p + 1 < sl.shown.size(); ++p) {
+            Vector3 s1 = side(p + 1);
+            Vector3 a = Vector3Add(sl.shown[p], off), b = Vector3Add(sl.shown[p + 1], off);
+            Vector3 a0 = Vector3Subtract(a, s0), a1 = Vector3Add(a, s0),
+                    b0 = Vector3Subtract(b, s1), b1 = Vector3Add(b, s1);
+            rlVertex3f(a0.x, a0.y, a0.z); rlVertex3f(b0.x, b0.y, b0.z); rlVertex3f(b1.x, b1.y, b1.z);
+            rlVertex3f(a0.x, a0.y, a0.z); rlVertex3f(b1.x, b1.y, b1.z); rlVertex3f(a1.x, a1.y, a1.z);
+            s0 = s1;
+        }
     }
-    rlDisableVertexArray();
-    rlDisableShader();
+    rlEnd();
+    rlDrawRenderBatchActive();
+    rlEnableBackfaceCulling();
 
-    // mesh is in grid coords (0..n), the dots are centered on the origin
+    // mesh is in grid coords (0..n), the lines are centered on the origin
     if (meshModel.meshCount > 0)
         DrawModel(meshModel, {-(float)(g.nx/2), -(float)(g.ny/2), -(float)(g.nz/2)}, 1.0f, WHITE);
 
     EndMode3D();
 }
 
+// one directional light plus some ambient so the model isn't a flat silhouette
+static Shader litShader() {
+    static Shader shader = LoadShaderFromMemory(
+        "#version 330\n"
+        "in vec3 vertexPosition; in vec3 vertexNormal;\n"
+        "uniform mat4 mvp; uniform mat4 matNormal;\n"
+        "out vec3 fragNormal;\n"
+        "void main() {\n"
+        "    fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));\n"
+        "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
+        "}\n",
+        "#version 330\n"
+        "in vec3 fragNormal; uniform vec4 colDiffuse; out vec4 finalColor;\n"
+        "void main() {\n"
+        "    vec3 light = normalize(vec3(-0.4, 0.8, 0.5));\n"
+        "    float d = max(dot(normalize(fragNormal), light), 0.0);\n"
+        "    finalColor = vec4(colDiffuse.rgb * (0.25 + 0.75 * d), colDiffuse.a);\n"
+        "}\n");
+    return shader;
+}
+
 void renderSetMesh(const TriMesh& mesh){
-    if (meshModel.meshCount > 0)
+    if (meshModel.meshCount > 0) {
+        // hand back the default shader first so UnloadModel doesn't free the shared lit one
+        meshModel.materials[0].shader = {rlGetShaderIdDefault(), rlGetShaderLocsDefault()};
         UnloadModel(meshModel);
+    }
 
     Mesh rayMesh;
     memset(&rayMesh, 0, sizeof rayMesh);
@@ -130,6 +260,7 @@ void renderSetMesh(const TriMesh& mesh){
 
     UploadMesh(&rayMesh, false); // LoadModelFromMesh doesn't send it to the GPU
     meshModel = LoadModelFromMesh(rayMesh);
+    meshModel.materials[0].shader = litShader();
 }
 
 void worldToFlow(float x, float y, float z) {
