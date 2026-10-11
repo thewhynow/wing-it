@@ -15,6 +15,6 @@ struct Forces    { glm::vec3 F; float cd, cl, cz, frontalArea; };
 struct SimParams { float inletU = 0.05f, tau = 0.55f; float aoaDeg = 0; };
 struct TriMesh   {
     std::vector<glm::vec3> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
     std::vector<glm::vec3> normals;
 };

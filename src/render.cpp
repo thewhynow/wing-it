@@ -100,18 +100,23 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
 
 void renderSetMesh(const TriMesh& mesh){
     Mesh rayMesh;
-    rayMesh.indices;
+    memset(&rayMesh, 0, sizeof rayMesh);
 
     // #error SWITCH INDICES GLOBALLY TO uint16_t
     rayMesh.indices = (uint16_t*) MemAlloc(mesh.indices.size());
+    std::memcpy(rayMesh.indices, mesh.indices.data(), mesh.indices.size() * sizeof(uint16_t));
 
-    rayMesh.vertices = (float*) MemAlloc(mesh.vertices.size() * sizeof(float));
-    std::memcpy(rayMesh.vertices, mesh.vertices.data(), mesh.vertices.size() * sizeof(float));
-    rayMesh.normals = (float*) MemAlloc(mesh.normals.size() * sizeof(float));
-    std::memcpy(rayMesh.normals, mesh.normals.data(), mesh.normals.size() * sizeof(float));
+    rayMesh.vertices = (float*) MemAlloc(mesh.vertices.size() * sizeof(glm::vec3));
+    std::memcpy(rayMesh.vertices, mesh.vertices.data(), mesh.vertices.size() * sizeof(glm::vec3));
+    rayMesh.normals = (float*) MemAlloc(mesh.normals.size() * sizeof(glm::vec3));
+    std::memcpy(rayMesh.normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3));
+
+    rayMesh.triangleCount = mesh.indices.size() / 3;
+    rayMesh.vertexCount = mesh.vertices.size() * 3;
 
     Model model = LoadModelFromMesh(rayMesh);
     DrawModel(model, {0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+    UnloadModel(model);
 }
 
 void worldToFlow(float x, float y, float z) {
