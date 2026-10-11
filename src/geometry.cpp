@@ -17,6 +17,13 @@ bool loadMesh(const std::string& path, TriMesh& out){
     config.triangulate = true;
     tinyobj::ObjReader reader;
 
+    if (!reader.ParseFromFile(path, config)){
+        if (!reader.Error().empty())
+            fprintf(stderr, "%s\n", reader.Error().c_str());
+
+        return false;
+    }
+
     auto &attrib = reader.GetAttrib();
     auto &shapes = reader.GetShapes();
 

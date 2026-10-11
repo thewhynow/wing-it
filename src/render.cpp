@@ -46,6 +46,8 @@ static Mesh buildRow(const std::vector<Vector2>& coords, float z) {
     return mesh;
 }
 
+static Model meshModel = {}; // uploaded once by renderSetMesh, drawn in voxel_loop
+
 void voxel_loop(AppState& appState, Render3DState& cameraState) {
     const Grid& g = cameraState.grid;
     static std::vector<Mesh> rows; // rows[k] is the mesh for coords[k]
@@ -95,15 +97,21 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
     rlDisableVertexArray();
     rlDisableShader();
 
+    // mesh is in grid coords (0..n), the dots are centered on the origin
+    if (meshModel.meshCount > 0)
+        DrawModel(meshModel, {-(float)(g.nx/2), -(float)(g.ny/2), -(float)(g.nz/2)}, 1.0f, WHITE);
+
     EndMode3D();
 }
 
 void renderSetMesh(const TriMesh& mesh){
+    if (meshModel.meshCount > 0)
+        UnloadModel(meshModel);
+
     Mesh rayMesh;
     memset(&rayMesh, 0, sizeof rayMesh);
 
-    // #error SWITCH INDICES GLOBALLY TO uint16_t
-    rayMesh.indices = (uint16_t*) MemAlloc(mesh.indices.size());
+    rayMesh.indices = (uint16_t*) MemAlloc(mesh.indices.size() * sizeof(uint16_t));
     std::memcpy(rayMesh.indices, mesh.indices.data(), mesh.indices.size() * sizeof(uint16_t));
 
     rayMesh.vertices = (float*) MemAlloc(mesh.vertices.size() * sizeof(glm::vec3));
@@ -112,11 +120,10 @@ void renderSetMesh(const TriMesh& mesh){
     std::memcpy(rayMesh.normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3));
 
     rayMesh.triangleCount = mesh.indices.size() / 3;
-    rayMesh.vertexCount = mesh.vertices.size() * 3;
+    rayMesh.vertexCount = mesh.vertices.size();
 
-    Model model = LoadModelFromMesh(rayMesh);
-    DrawModel(model, {0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
-    UnloadModel(model);
+    UploadMesh(&rayMesh, false); // LoadModelFromMesh doesn't send it to the GPU
+    meshModel = LoadModelFromMesh(rayMesh);
 }
 
 void worldToFlow(float x, float y, float z) {

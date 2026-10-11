@@ -5,6 +5,7 @@
 #include <thread>
 #include "render.hpp"
 #include "ui.hpp"
+#include "geometry.hpp"
 
 ImFont* bodyFont = nullptr;
 
@@ -39,6 +40,15 @@ int main() {
     }
     cameraState->coords.push_back(morecoords);
     printf("got here! coords.size(): %d\n", (int)cameraState->coords.size());
+
+    TriMesh mesh;
+    bool success = loadMesh("./assets/models/monkey.obj", mesh);
+    if (success)
+        printf("model %s loaded successfully!\n", "monkey.obj");
+
+    fitToGrid(mesh, cameraState->grid, 0.0f, false);
+    voxelize(mesh, cameraState->grid);
+    renderSetMesh(mesh);
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
         BeginDrawing();
