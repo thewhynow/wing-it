@@ -56,6 +56,13 @@
     static void netInit() {}
 #endif
 
+static pollfd mkPoll(int fd, short ev) {
+    pollfd p{};
+    p.fd = (decltype(p.fd))fd;
+    p.events = ev;
+    return p;
+}
+
 static constexpr size_t kMaxLine = 4096;
 
 void NetPeer::fail(NetState s, const std::string& why) {
@@ -165,12 +172,12 @@ void NetPeer::runHost(int port, int maxClients) {
         std::vector<pollfd> pfds;
         bool canAccept = (int)clients.size() < maxClients;
         if (canAccept) {
-            pfds.push_back({ls, POLLIN, 0});
+            pfds.push_back(mkPoll(ls, POLLIN));
         }
         for (const auto& c : clients) {
             short ev = POLLIN;
             if (!c.wbuf.empty()) ev |= POLLOUT;
-            pfds.push_back({c.fd, ev, 0});
+            pfds.push_back(mkPoll(c.fd, ev));
         }
 
         int pr = pollSock(pfds.data(), (nfds_t)pfds.size(), 20);
@@ -307,7 +314,7 @@ void NetPeer::runJoin(std::string address, int port) {
     // wait up to ~6 s in short slices so close() can cancel
     bool ok = rc == 0;
     for (int i = 0; !ok && i < 60 && !stop; i++) {
-        pollfd p{fd, POLLOUT, 0};
+        pollfd p = mkPoll(fd, POLLOUT);
         if (pollSock(&p, 1, 100) > 0) {
             int e = 0; socklen_t len = sizeof e;
             getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&e, &len);
@@ -345,7 +352,7 @@ void NetPeer::ioLoop(int fd) {
     };
     while (!stop) {
         drainOutbox();
-        pollfd p{fd, (short)(POLLIN | (wbuf.empty() ? 0 : POLLOUT)), 0};
+        pollfd p = mkPoll(fd, (short)(POLLIN | (wbuf.empty() ? 0 : POLLOUT)));
         int pr = pollSock(&p, 1, 20);
         if (pr < 0 && !errIntr(netErr())) { fail(NetState::Failed, "network error"); break; }
         if (pr > 0 && (p.revents & POLLOUT)) {
