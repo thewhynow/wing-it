@@ -1,0 +1,152 @@
+# Builds and tests on Linux (GCC + Clang), macOS (Apple Clang) and Windows (MSVC)
+# on every push/PR to main. Pushing a tag that starts with "v" (e.g. v1.0.0) also
+# publishes a GitHub Release with the packaged builds attached.
+#
+# Requires install() rules and include(CPack) in CMakeLists.txt for the packaging step.
+name: CMake on multiple platforms
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:          # run manually from the Actions tab
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    # A build marked allow_failure still runs and shows its result, but a failure
+    # there doesn't block the release. Windows is marked this way until the code
+    # compiles with MSVC; remove the flag once it builds cleanly.
+    continue-on-error: ${{ matrix.allow_failure == true }}
+
+    strategy:
+      # Report results for every configuration even if one fails.
+      fail-fast: false
+
+      # "package: true" marks which builds get attached to a release.
+      # Only one Linux build is packaged: GCC and Clang would both produce
+      # <name>-<version>-Linux.tar.gz and clash on the release page.
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            cpack_generator: TGZ
+            package: true
+          - name: linux-clang
+            os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            package: false
+          - name: macos
+            os: macos-latest          # Apple Silicon (arm64)
+            c_compiler: clang
+            cpp_compiler: clang++
+            cpack_generator: TGZ
+            package: true
+          - name: windows-msvc
+            os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            cpack_generator: ZIP
+            package: true
+            allow_failure: true
+            # Static curl from vcpkg, linked against the normal (DLL) MSVC runtime,
+            # so the release zip doesn't need extra curl DLLs next to the .exe.
+            cmake_args: -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # raylib builds GLFW from source, which needs the X11 / OpenGL development
+      # headers; find_package(CURL) needs the libcurl development package.
+      # GitHub's Ubuntu runners include neither.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev \
+            libwayland-dev libxkbcommon-dev \
+            libcurl4-openssl-dev
+
+      # curl and OpenGL come with the macOS SDK. Apple's clang has no OpenMP
+      # runtime, so libomp comes from Homebrew; OpenMP_ROOT tells CMake's
+      # find_package(OpenMP) where Homebrew put it.
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install libomp
+          echo "OpenMP_ROOT=$(brew --prefix libomp)" >> "$GITHUB_ENV"
+
+      # Windows has no curl development package either. vcpkg is preinstalled on
+      # GitHub's Windows runners; this builds curl and points CMake at it.
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install curl:x64-windows-static-md
+          "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          ${{ matrix.cmake_args }}
+
+      # Your build command, plus --config so Windows (Visual Studio generator,
+      # multi-config) builds Release instead of its default Debug.
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j
+
+      - name: Test
+        run: ctest --test-dir build --build-config ${{ env.BUILD_TYPE }} --output-on-failure
+
+      - name: Package
+        if: matrix.package
+        run: cpack --config build/CPackConfig.cmake -C ${{ env.BUILD_TYPE }} -G ${{ matrix.cpack_generator }} -B dist
+
+      - name: Upload package
+        if: matrix.package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.name }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build                                   # waits for every build
+    if: startsWith(github.ref, 'refs/tags/v')      # only on version tags
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}   # v1.0.0-beta → pre-release
