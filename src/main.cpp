@@ -12,6 +12,7 @@
 #include "solver.hpp"
 #include "multiplayer.hpp"
 #include "title.hpp"
+#include "server.hpp"
 
 ImFont* bodyFont = nullptr;
 
@@ -26,6 +27,7 @@ int main() {
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));
+    start_server_thread();
 
     ImGuiIO& io = ImGui::GetIO();
     SetExitKey(KEY_NULL);
@@ -137,6 +139,7 @@ int main() {
     threadRunning = false;
     timerThread.join();
     stopSolver();
+    stop_server_thread();
 
     ImPlot::DestroyContext();
     rlImGuiShutdown();

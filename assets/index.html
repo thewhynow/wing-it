@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Scan File</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .upload-label {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            width: 200px;
+            height: 200px;
+            font-size: 120px;
+            color: #fff;
+            background-color: #333;
+            border-radius: 50%;
+            cursor: pointer;
+            margin: 20px auto;
+            transition: background-color 0.3s;
+            user-select: none;
+        }
+        .upload-label:hover {
+            background-color: #444;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        button {
+            background-color: #888;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 18px;
+            margin-top: 30px;
+        }
+        button:hover {
+            background-color: #999;
+        }
+        #message {
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        #fileName {
+            margin-top: 10px;
+            color: #aaa;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <form id="uploadForm">
+            <label for="fileInput" class="upload-label">+</label>
+            <input type="file" id="fileInput" name="scan_file" required>
+            <div id="fileName"></div>
+            <br>
+            <button type="submit">Upload</button>
+        </form>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const message = document.getElementById('message');
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDisplay = document.getElementById('fileName');
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                fileNameDisplay.textContent = fileInput.files[0].name;
+            } else {
+                fileNameDisplay.textContent = '';
+            }
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            message.textContent = 'Uploading...';
+            
+            const file = fileInput.files[0];
+            if (!file) {
+                message.textContent = 'Please select a file first.';
+                message.style.color = 'red';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('scan_file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    message.textContent = 'File uploaded successfully!';
+                    message.style.color = 'lightgreen';
+                } else {
+                    message.textContent = 'Failed to upload file.';
+                    message.style.color = 'red';
+                }
+            } catch (error) {
+                message.textContent = 'Error occurred during upload.';
+                message.style.color = 'red';
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -263,7 +263,7 @@ void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState
         Mesh &m = meshModel.meshes[0];
         for (size_t i = 0; i < nSurf; ++i) {
             Color c = uiState.showColors ? shade(i) : WHITE;
-            std::memcpy(m.colors + 4 * i, &c, 4);
+            memcpy(m.colors + 4 * i, &c, 4);
         }
         UpdateMeshBuffer(m, 3, m.colors, (int)nSurf * 4, 0);
     }
@@ -357,16 +357,16 @@ void renderSetMesh(const TriMesh& mesh){
     memset(&rayMesh, 0, sizeof rayMesh);
 
     rayMesh.indices = (uint16_t*) MemAlloc(mesh.indices.size() * sizeof(uint16_t));
-    std::memcpy(rayMesh.indices, mesh.indices.data(), mesh.indices.size() * sizeof(uint16_t));
+    memcpy(rayMesh.indices, mesh.indices.data(), mesh.indices.size() * sizeof(uint16_t));
 
     rayMesh.vertices = (float*) MemAlloc(mesh.vertices.size() * sizeof(glm::vec3));
-    std::memcpy(rayMesh.vertices, mesh.vertices.data(), mesh.vertices.size() * sizeof(glm::vec3));
+    memcpy(rayMesh.vertices, mesh.vertices.data(), mesh.vertices.size() * sizeof(glm::vec3));
     rayMesh.normals = (float*) MemAlloc(mesh.normals.size() * sizeof(glm::vec3));
-    std::memcpy(rayMesh.normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3));
+    memcpy(rayMesh.normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3));
 
     // per-vertex pressure colours, rewritten every frame in voxel_loop
     rayMesh.colors = (unsigned char*) MemAlloc(mesh.vertices.size() * 4);
-    std::memset(rayMesh.colors, 255, mesh.vertices.size() * 4);
+    memset(rayMesh.colors, 255, mesh.vertices.size() * 4);
 
     rayMesh.triangleCount = mesh.indices.size() / 3;
     rayMesh.vertexCount = mesh.vertices.size();

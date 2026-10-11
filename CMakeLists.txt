@@ -55,8 +55,20 @@ FetchContent_Declare(tinyobjloader
   GIT_SHALLOW    TRUE
   SOURCE_SUBDIR  _none
   GIT_PROGRESS    TRUE)
+FetchContent_Declare(qrcodegen 
+    GIT_REPOSITORY https://github.com/nayuki/QR-Code-generator.git 
+    GIT_TAG v1.8.0 
+    GIT_SHALLOW TRUE 
+    GIT_PROGRESS TRUE
+)
+FetchContent_Declare(cpp-httplib 
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git 
+    GIT_TAG v0.48.0 
+    GIT_SHALLOW TRUE 
+    GIT_PROGRESS TRUE
+)
 
-FetchContent_MakeAvailable(raylib glm imgui implot rlimgui tinyobjloader)
+FetchContent_MakeAvailable(raylib glm imgui implot rlimgui tinyobjloader qrcodegen cpp-httplib)
 
 # Dear ImGui + ImPlot + rlImGui as one static lib
 add_library(imgui_lib STATIC
@@ -101,9 +113,10 @@ endif()
 
 add_executable(wing_it ${APP_SOURCES}
   ${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc
+${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
         src/common.cpp)  # defines TINYOBJLOADER_IMPLEMENTATION - do not define it in src/
-target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR})
-target_link_libraries(wing_it PRIVATE raylib imgui_lib glm::glm Threads::Threads)
+target_include_directories(wing_it PRIVATE inc ${tinyobjloader_SOURCE_DIR} ${qrcodegen_SOURCE_DIR}/cpp)
+target_link_libraries(wing_it PRIVATE raylib imgui_lib glm::glm Threads::Threads httplib::httplib)
 if(OpenMP_CXX_FOUND)
   target_link_libraries(wing_it PRIVATE OpenMP::OpenMP_CXX)
 endif()
