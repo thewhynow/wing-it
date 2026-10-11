@@ -69,7 +69,7 @@ void ui_loop(AppState& appState, UiState& uiState) {
     if (appState.screen == APP_SCREEN_WELCOME) {
         titleDraw();
         titleMenuBegin();
-        if (titleMenuButton("Enter") || IsKeyPressed(KEY_ENTER))
+        if (titleMenuButton("Start") || IsKeyPressed(KEY_ENTER))
             appState.screen = APP_SCREEN_SELECT_MODEL;
         // add more title menu buttons here, e.g. if (titleMenuButton("Multiplayer")) ...
         titleMenuEnd();

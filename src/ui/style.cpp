@@ -22,19 +22,15 @@ ImVec4 rgb(int r, int g, int b, float a = 1.0f) { return ImVec4(r / 255.0f, g / 
 
 void loadProFonts() {
     ImGuiIO &io = ImGui::GetIO();
-    const char *ttc = "assets/fonts/HelveticaNeue.ttc", *ttf = "assets/fonts/HelveticaNeue-01.ttf";
+    // const char *ttc = "assets/fonts/HelveticaNeue.ttc", *ttf = "assets/fonts/HelveticaNeue-01.ttf";
     // HelveticaNeue.ttc faces: 0 Regular, 7 Light, 10 Medium
-    gFontBody = tryFont(ttc, 18.0f, 0);
-    if (!gFontBody) gFontBody = tryFont(ttf, 18.0f);
-    gFontLight = tryFont(ttc, 54.0f, 7);
-    gFontMedium = tryFont(ttc, 16.0f, 10);
-    gFontMono = tryFont("/System/Library/Fonts/Menlo.ttc", 13.0f, 0);
-    if (!gFontMono) gFontMono = tryFont("/System/Library/Fonts/SFNSMono.ttf", 13.0f);
+    // gFontMono = tryFont("/System/Library/Fonts/Menlo.ttc", 13.0f, 0);
+    // if (!gFontMono) gFontMono = tryFont("/System/Library/Fonts/SFNSMono.ttf", 13.0f);
 
-    if (!gFontBody) gFontBody = io.FontDefault ? io.FontDefault : ImGui::GetIO().Fonts->Fonts[0];
-    if (!gFontLight) gFontLight = gFontBody;
-    if (!gFontMedium) gFontMedium = gFontBody;
-    if (!gFontMono) gFontMono = gFontBody;
+    gFontBody = io.FontDefault ? io.FontDefault : ImGui::GetIO().Fonts->Fonts[0];
+    gFontLight = gFontBody;
+     gFontMedium = gFontBody;
+     gFontMono = gFontBody;
     io.FontDefault = gFontBody;
 }
 
