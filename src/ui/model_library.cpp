@@ -172,7 +172,8 @@ void drawPhoneWindow(const UiState& ui) {
                 ImGui::TextColored(kGreen, "from phone");
             }
             float bw = 140.0f;
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionMax().x - bw));
+            float afterText = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + ImGui::GetStyle().ItemSpacing.x;
+            ImGui::SameLine(std::max(afterText, ImGui::GetContentRegionMax().x - bw));
             if (id == lastSelected) {
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextColored(kGreen, "Selected");
