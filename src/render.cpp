@@ -1,6 +1,7 @@
 #include "raylib.h"
 #include "raymath.h"
 #include "rlgl.h"
+#include "solver.hpp"
 #if defined(__APPLE__)
     #define GL_SILENCE_DEPRECATION
     #include <OpenGL/gl3.h>
@@ -49,7 +50,7 @@ static Mesh buildRow(const std::vector<Vector2>& coords, float z) {
 static Model meshModel = {}; // uploaded once by renderSetMesh, drawn in voxel_loop
 
 void voxel_loop(AppState& appState, Render3DState& cameraState) {
-    const Grid& g = cameraState.grid;
+    Grid &g = cameraState.grid;
     static std::vector<Mesh> rows; // rows[k] is the mesh for coords[k]
 
     // raylib can't draw GL_POINTS from a mesh, so use a tiny flat-color shader and draw it ourselves
@@ -64,11 +65,16 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
     static int colorLoc = GetShaderLocation(dotShader, "color");
 
     // add a new z row each frame until there's one per grid cell in z
+    FlowField out;
     if ((int)cameraState.coords.size() < g.nz) {
         std::vector<Vector2> morecoords;
         morecoords.reserve(g.nx * g.ny);
         for (Vector2 c : cameraState.coords.back()) {
-            Vector2 mag = {0, 0};
+
+            size_t idx = FlowField::cellIndex(g, static_cast<size_t>(c.x + g.nx / 2), static_cast<size_t>(c.y + g.ny / 2), static_cast<size_t>(cameraState.coords.back().size() - 1));
+            solverSnapshot(out);
+            printf("idx: %zu, length: %zu\n", idx, out.ux.size());
+            Vector2 mag = {out.ux[idx], out.uy[idx]};
             morecoords.push_back(Vector2Add(c, mag));
         }
         cameraState.coords.push_back(morecoords);

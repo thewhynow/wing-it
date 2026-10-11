@@ -9,7 +9,7 @@ struct Grid      { int nx = 80, ny = 80, nz = 160;
 struct FlowField {
     std::vector<float> ux, uy, uz, rho;
 
-    static size_t cellIndex(Grid &g, size_t x, size_t y, size_t z);
+    static size_t cellIndex(const Grid &g, size_t x, size_t y, size_t z);
 };              // per cell
 struct Forces    { glm::vec3 F; float cd, cl, cz, frontalArea; };
 struct SimParams { float inletU = 0.05f, tau = 0.55f; float aoaDeg = 0; };
