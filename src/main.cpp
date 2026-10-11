@@ -28,17 +28,17 @@ int main() {
     }
 
     ImPlot::CreateContext();
-    printf("got here!");
+    printf("got here! grid.nx: %d, grid.ny: %d\n", cameraState->grid.nx, cameraState->grid.ny);
     // we need to start by creating a vertex at the middle of every element
     std::vector<Vector2> morecoords;
     morecoords.reserve(cameraState->grid.nx * cameraState->grid.ny);
-    for (int x = -(cameraState->grid.nx/2); x < cameraState->grid.nx - cameraState->grid.nx/2; x++) {
-        for (int y = -(cameraState->grid.ny/2); y < cameraState->grid.ny - cameraState->grid.ny/2; y++) {
+    for (int x = -(cameraState->grid.nx/2); x < cameraState->grid.nx - cameraState->grid.nx/2; x += 3) {
+        for (int y = -(cameraState->grid.ny/2); y < cameraState->grid.ny - cameraState->grid.ny/2; y += 3) {
             morecoords.push_back(Vector2(x, y));
         }
     }
     cameraState->coords.push_back(morecoords);
-    printf("got here!");
+    printf("got here! coords.size(): %d\n", (int)cameraState->coords.size());
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
         BeginDrawing();

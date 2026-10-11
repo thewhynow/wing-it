@@ -20,7 +20,7 @@ void camera_loop(AppState& appState, Render3DState& cameraState) {
         cameraState.pitch = Clamp(cameraState.pitch, -1.5f, 1.5f); // avoid flipping over the poles
     }
     cameraState.dist *= 1.0f - GetMouseWheelMove() * 0.1f; // zoom step scales with distance
-    cameraState.dist = Clamp(cameraState.dist, 1.0f, 400.0f); // far enough to see the whole 160x80x80 grid
+    cameraState.dist = Clamp(cameraState.dist, 0.00000000000001f, 4000000000000.0f); // far enough to see the whole 160x80x80 grid
 
     cameraState.camera.position = (Vector3){
         cameraState.dist * cosf(cameraState.pitch) * sinf(cameraState.yaw),
@@ -65,10 +65,9 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
     if ((int)cameraState.coords.size() < g.nz) {
         std::vector<Vector2> morecoords;
         morecoords.reserve(g.nx * g.ny);
-        for (int x = -(g.nx/2); x < g.nx - g.nx/2; x++) {
-            for (int y = -(g.ny/2); y < g.ny - g.ny/2; y++) {
-                morecoords.push_back(Vector2(x, y));
-            }
+        for (Vector2 c : cameraState.coords.back()) {
+            Vector2 mag = {0, 0};
+            morecoords.push_back(Vector2Add(c, mag));
         }
         cameraState.coords.push_back(morecoords);
     }
@@ -103,7 +102,7 @@ void renderSetMesh(const TriMesh& mesh){
     Mesh rayMesh;
     rayMesh.indices;
 
-    #error SWITCH INDICES GLOBALLY TO uint16_t
+    // #error SWITCH INDICES GLOBALLY TO uint16_t
     rayMesh.indices = (uint16_t*) MemAlloc(mesh.indices.size());
 
     rayMesh.vertices = (float*) MemAlloc(mesh.vertices.size() * sizeof(float));
@@ -113,4 +112,8 @@ void renderSetMesh(const TriMesh& mesh){
 
     Model model = LoadModelFromMesh(rayMesh);
     DrawModel(model, {0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+}
+
+void worldToFlow(float x, float y, float z) {
+
 }

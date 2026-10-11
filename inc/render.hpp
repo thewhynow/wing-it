@@ -16,12 +16,7 @@ struct Render3DState {
         .fovy = 45.0f,
         .projection = CAMERA_PERSPECTIVE
     };
-    Grid grid = {
-        .nx = 160,
-        .ny = 80,
-        .nz = 80,
-        .solid = std::vector<uint8_t>(160 * 80 * 80, 0),
-    };
+    Grid grid;
     // First vector stores the Z of all the coordinates
     // Inner vector stores all the coordinates
     // vec2 stores X and Y positions
