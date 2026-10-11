@@ -1,8 +1,16 @@
-# Builds and tests on Linux (GCC + Clang), macOS (Apple Clang) and Windows (MSVC)
+# Builds and tests on Linux (GCC), macOS (Apple Clang) and Windows (MSVC)
 # on every push/PR to main. Pushing a tag that starts with "v" (e.g. v1.0.0) also
 # publishes a GitHub Release with the packaged builds attached.
 #
 # Requires install() rules and include(CPack) in CMakeLists.txt for the packaging step.
+#
+# Caching:
+#   - Dependencies downloaded by FetchContent (raylib, json, glm, ...) are kept
+#     between runs, so they aren't re-downloaded.
+#   - Compiled object files are reused with ccache on Linux and macOS, so only
+#     changed files are recompiled.
+#   - vcpkg's build of curl is reused on Windows.
+# Caches can be viewed or deleted under the repo's Actions tab → Caches.
 name: CMake on multiple platforms
 
 on:
@@ -18,6 +26,7 @@ permissions:
 
 env:
   BUILD_TYPE: Release
+  HOMEBREW_NO_AUTO_UPDATE: 1  # skip Homebrew's slow self-update before "brew install"
 
 jobs:
   build:
@@ -34,27 +43,22 @@ jobs:
       fail-fast: false
 
       # "package: true" marks which builds get attached to a release.
-      # Only one Linux build is packaged: GCC and Clang would both produce
-      # <name>-<version>-Linux.tar.gz and clash on the release page.
       matrix:
         include:
-          - name: linux-gcc
+          - name: linux
             os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
             cpack_generator: TGZ
             package: true
-          - name: linux-clang
-            os: ubuntu-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-            package: false
+            cmake_args: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           - name: macos
             os: macos-latest          # Apple Silicon (arm64)
             c_compiler: clang
             cpp_compiler: clang++
             cpack_generator: TGZ
             package: true
+            cmake_args: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           - name: windows-msvc
             os: windows-latest
             c_compiler: cl
@@ -68,6 +72,46 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      # ---------------------------------------------------------------- caches
+
+      # Dependencies downloaded by FetchContent. Restored here, saved right after
+      # Configure. Editing CMakeLists.txt (e.g. bumping a dependency version)
+      # starts a new cache that builds on the previous one.
+      # If Configure ever fails inside build/_deps after GitHub updates its
+      # runners, delete the "deps-" caches under Actions → Caches.
+      - name: Restore downloaded dependencies
+        id: deps-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            build/_deps/*-src
+            build/_deps/*-subbuild
+          key: deps-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ matrix.name }}-
+
+      # Compiled object files for your code and its dependencies; ccache reuses
+      # anything whose source hasn't changed. Not used on Windows: the Visual
+      # Studio generator doesn't support compiler launchers like ccache.
+      - name: Set up ccache
+        if: runner.os != 'Windows'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.name }}
+
+      # vcpkg's compiled curl (several minutes to build from scratch). A fresh copy
+      # is saved each run because vcpkg rebuilds whenever GitHub updates the
+      # runner's compiler; old copies expire on their own.
+      - name: Restore vcpkg packages
+        if: runner.os == 'Windows'
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: vcpkg-${{ matrix.name }}-${{ github.run_id }}
+          restore-keys: vcpkg-${{ matrix.name }}-
+
+      # --------------------------------------------------- system dependencies
 
       # raylib builds GLFW from source, which needs the X11 / OpenGL development
       # headers; find_package(CURL) needs the libcurl development package.
@@ -92,12 +136,26 @@ jobs:
           echo "OpenMP_ROOT=$(brew --prefix libomp)" >> "$GITHUB_ENV"
 
       # Windows has no curl development package either. vcpkg is preinstalled on
-      # GitHub's Windows runners; this builds curl and points CMake at it.
+      # GitHub's Windows runners; this builds curl (or reuses the cached build)
+      # and points CMake at it.
       - name: Install Windows dependencies
         if: runner.os == 'Windows'
+        env:
+          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg-cache,readwrite
         run: |
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/vcpkg-cache" | Out-Null
           vcpkg install curl:x64-windows-static-md
           "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Saved straight away so it's kept even if the Windows build fails later.
+      - name: Save vcpkg packages
+        if: runner.os == 'Windows'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      # ----------------------------------------------------------------- build
 
       - name: Configure CMake
         run: >
@@ -106,6 +164,17 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           ${{ matrix.cmake_args }}
+
+      # Saved straight after Configure (which does the downloading), so it's kept
+      # even if a later step fails. Skipped when nothing changed.
+      - name: Save downloaded dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            build/_deps/*-src
+            build/_deps/*-subbuild
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
 
       # Your build command, plus --config so Windows (Visual Studio generator,
       # multi-config) builds Release instead of its default Debug.
