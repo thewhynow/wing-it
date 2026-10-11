@@ -114,16 +114,22 @@ void ui_loop(AppState& appState, UiState& uiState) {
     }
 
     ImGui::SetNextWindowPos(ImVec2(GetScreenWidth() - 10.0f, 10.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-    ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    {
+    ImGui::SetNextWindowSize(ImVec2(250, 0), ImGuiCond_Always); // narrow; height follows the content
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6, 3));
+    // the title-bar arrow collapses it down to just the title
+    const bool controlsOpen = ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    if (controlsOpen) {
+        ImGui::SetWindowFontScale(0.85f);
+        ImGui::PushItemWidth(120);
         Forces fr = solverForces({}, {});
-        ImGui::SetWindowFontScale(1.4f);
+        ImGui::SetWindowFontScale(1.1f);
         ImGui::Text("Drag coefficient (Cd): %.3f", fr.cd);
-        ImGui::SetWindowFontScale(1.0f);
-        ImGui::Text("Lift (Cl): %.3f   Side (Cz): %.3f", fr.cl, fr.cz);
+        ImGui::SetWindowFontScale(0.85f);
+        ImGui::Text("Cl: %.3f   Cz: %.3f", fr.cl, fr.cz);
         float hist[400];
         int n = solverDragHistory(hist, 400);
-        if (n > 1 && ImPlot::BeginPlot("##cd", ImVec2(260, 60), ImPlotFlags_CanvasOnly | ImPlotFlags_NoInputs)) {
+        if (n > 1 && ImPlot::BeginPlot("##cd", ImVec2(-1, 40), ImPlotFlags_CanvasOnly | ImPlotFlags_NoInputs)) {
             ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
             ImPlot::SetupAxisLimits(ImAxis_X1, 0, 399, ImGuiCond_Always);
             ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 3, ImGuiCond_Once);
@@ -131,32 +137,34 @@ void ui_loop(AppState& appState, UiState& uiState) {
             ImPlot::EndPlot();
         }
         ImGui::Separator();
-    }
-    // only rebuild once the slider is let go, re-voxelizing restarts the flow
-    const char *axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
-    for (int i = 0; i < 3; ++i) {
-        ImGui::SliderFloat(axes[i], &uiState.rotation[i], -180.0f, 180.0f, "%.0f deg");
+        // only rebuild once the slider is let go, re-voxelizing restarts the flow
+        const char *axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
+        for (int i = 0; i < 3; ++i) {
+            ImGui::SliderFloat(axes[i], &uiState.rotation[i], -180.0f, 180.0f, "%.0f deg");
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                uiState.modelChanged = true;
+        }
+        ImGui::SliderFloat("AoA", &uiState.params.aoaDeg, -30.0f, 30.0f, "%.1f deg"); // pitch, positive is nose up
         if (ImGui::IsItemDeactivatedAfterEdit())
             uiState.modelChanged = true;
-    }
-    ImGui::SliderFloat("AoA", &uiState.params.aoaDeg, -30.0f, 30.0f, "%.1f deg"); // pitch, positive is nose up
-    if (ImGui::IsItemDeactivatedAfterEdit())
-        uiState.modelChanged = true;
-    ImGui::SliderInt("Grid size", &uiState.gridSize, 40, 112, "%d cells");
-    if (ImGui::IsItemDeactivatedAfterEdit())
-        uiState.modelChanged = true;
+        ImGui::SliderInt("Grid size", &uiState.gridSize, 40, 112, "%d cells");
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            uiState.modelChanged = true;
 
-    // the inlet reads this every step so it applies live. lattice units, keep it well under the sound speed (0.577)
-    ImGui::SliderFloat("Wind speed", &uiState.params.inletU, 0.01f, 0.12f, "%.3f");
-    // changing this live slams a pressure wave through the tunnel, so it restarts the flow at the new density
-    ImGui::SliderFloat("Air density", &uiState.params.inletRho, 0.5f, 2.0f, "%.2f");
-    if (ImGui::IsItemDeactivatedAfterEdit())
-        uiState.modelChanged = true;
-    ImGui::Checkbox("Pressure colours", &uiState.showColors);
-    ImGui::Checkbox("Streamlines", &uiState.showLines);
-    if (ImGui::Button("Change model", ImVec2(-FLT_MIN, 0)))
-        appState.screen = APP_SCREEN_SELECT_MODEL;
+        // the inlet reads this every step so it applies live. lattice units, keep it well under the sound speed (0.577)
+        ImGui::SliderFloat("Wind speed", &uiState.params.inletU, 0.01f, 0.12f, "%.3f");
+        // changing this live slams a pressure wave through the tunnel, so it restarts the flow at the new density
+        ImGui::SliderFloat("Air density", &uiState.params.inletRho, 0.5f, 2.0f, "%.2f");
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            uiState.modelChanged = true;
+        ImGui::Checkbox("Pressure colours", &uiState.showColors);
+        ImGui::Checkbox("Streamlines", &uiState.showLines);
+        if (ImGui::Button("Change model", ImVec2(-FLT_MIN, 0)))
+            appState.screen = APP_SCREEN_SELECT_MODEL;
+        ImGui::PopItemWidth();
+    }
     ImGui::End();
+    ImGui::PopStyleVar(2);
 
     rlImGuiEnd();
 
