@@ -111,6 +111,10 @@ void renderSetMesh(const TriMesh& mesh){
     rayMesh.normals = (float*) MemAlloc(mesh.normals.size() * sizeof(glm::vec3));
     std::memcpy(rayMesh.normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3));
 
+    rayMesh.triangleCount = mesh.indices.size() / 3;
+    rayMesh.vertexCount = mesh.vertices.size() * 3;
+
     Model model = LoadModelFromMesh(rayMesh);
     DrawModel(model, {0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+    UnloadModel(model);
 }
