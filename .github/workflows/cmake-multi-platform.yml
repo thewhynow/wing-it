@@ -1,4 +1,4 @@
-# Builds and tests on Linux (GCC + Clang), macOS (Apple Clang) and Windows (MSVC)
+# Builds and tests on Linux (GCC), macOS (Apple Clang) and Windows (MSVC)
 # on every push/PR to main. Pushing a tag that starts with "v" (e.g. v1.0.0) also
 # publishes a GitHub Release with the packaged builds attached.
 #
@@ -34,21 +34,14 @@ jobs:
       fail-fast: false
 
       # "package: true" marks which builds get attached to a release.
-      # Only one Linux build is packaged: GCC and Clang would both produce
-      # <name>-<version>-Linux.tar.gz and clash on the release page.
       matrix:
         include:
-          - name: linux-gcc
+          - name: linux
             os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
             cpack_generator: TGZ
             package: true
-          - name: linux-clang
-            os: ubuntu-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-            package: false
           - name: macos
             os: macos-latest          # Apple Silicon (arm64)
             c_compiler: clang
