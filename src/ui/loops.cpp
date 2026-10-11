@@ -49,16 +49,17 @@ void ui_loop(AppState& appState, UiState& uiState) {
     rlImGuiBegin();
 
     // --- 1. Frame Counter (Top-Left Corner of Screen) ---
-    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
-    ImGui::Begin("HUD", nullptr,
-        ImGuiWindowFlags_NoDecoration |
-        ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoBackground |
-        ImGuiWindowFlags_NoInputs);
-
-    ImGui::Text("Frames: %lld", appState.frameCount++);
-    ImGui::Text("FPS: %lld", appState.frameRate.load());
-    ImGui::End();
+    appState.frameCount++;
+    if (appState.screen != APP_SCREEN_WELCOME) { // the title page has its own header
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::Begin("HUD", nullptr,
+            ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoBackground |
+            ImGuiWindowFlags_NoInputs);
+        ImGui::TextDisabled("FRAME %lld   FPS %lld", appState.frameCount.load(), appState.frameRate.load());
+        ImGui::End();
+    }
 
 
     ImVec2 screenCenter = ImVec2(GetScreenWidth() * 0.5f, GetScreenHeight() * 0.5f);

@@ -1,302 +1,402 @@
 #include "title.hpp"
-#include "models.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
-#include <imgui.h>
-#include <raylib.h>
 #include <string>
 #include <vector>
-#include <glm/glm.hpp>
+#include <imgui.h>
+#include <raylib.h>
 
 #include "geometry.hpp"
+#include "models.hpp"
+#include "render.hpp"
+#include "solver.hpp"
+#include "style.hpp"
+#include "ui.hpp"
 
 namespace {
 
-constexpr int    kSprite  = 160;     // sprite edge in px
-constexpr int    kFrames  = 24;      // turntable frames
-constexpr int    kCols    = 6;       // sheet layout
-constexpr int    kRows    = kFrames / kCols;
-constexpr int    kSS      = 2;       // supersampling factor
-constexpr size_t kMaxTris = 24000;   // decimate bigger meshes
+constexpr int   kSS = 2;          // offscreen supersampling, smooths the 1px lines and ribbon edges
+constexpr float kFade = 0.45f;    // seconds the model name takes to fade in / out
+constexpr float kOrbit = 0.11f;   // camera yaw speed, rad/s
+constexpr float kMargin = 56.0f;
 
-struct Floater {
-    int sheet; float depth, x, y, speed, bob, bobSpeed, spin, phase, tilt;
+struct Entry {
+    std::string path, file, name;
+    bool loaded = false, bad = false;
+    TriMesh mesh;
 };
-struct Streak { float x, y, len, speed, alpha, thick; };
 
-std::vector<Texture2D> gSheets;
-std::vector<Floater>   gFloaters;
-std::vector<Streak>    gStreaks;
-bool gInited = false;
+std::vector<Entry> gEntries;
+int    gCurrent = -1;          // entry the sim is running, -1 before the first one
+bool   gActive = false;        // on the welcome screen
+bool   gVisitLoaded = false;   // a model has been built since the welcome screen was (re)entered
+double gShownAt = 0, gNextSwitch = 0;
+float  gYaw = 0.9f;
+float  gNameW = -1;            // eased width of the name, so the line re-centres smoothly
+int    gGrid[3] = {0, 0, 0};
 
-float frand(unsigned &s) { s = s * 1664525u + 1013904223u; return (s >> 8) / 16777216.0f; }
+RenderTexture2D gRT{};
+UiState *gUi = nullptr;        // display flags for voxel_loop (colours + streamlines on), independent of the user's
 
-// software-rasterize kFrames yaw turntable frames of `mesh` into `sheet` (RGBA, kCols*kSprite wide)
-void renderSheet(const TriMesh &mesh, Color base, Color rim, std::vector<Color> &sheet) {
-    const int R = kSprite * kSS;
-    const int W = kCols * kSprite;
-    const size_t triCount = mesh.indices.size() / 3;
-    const size_t stride = std::max<size_t>(1, (triCount + kMaxTris - 1) / kMaxTris);
-
-    glm::vec3 lo(1e30f), hi(-1e30f);
-    for (auto &v : mesh.vertices) lo = glm::min(lo, v), hi = glm::max(hi, v);
-    const glm::vec3 c = (lo + hi) * 0.5f;
-    float rad = 0;
-    for (auto &v : mesh.vertices) rad = std::max(rad, glm::length(v - c));
-    if (rad <= 0) return;
-    const float scale = R * 0.47f / rad;
-
-    std::vector<glm::vec3> pv(mesh.vertices.size());
-    std::vector<Color> buf(R * R);
-    std::vector<float> zb(R * R);
-    const glm::vec3 L = glm::normalize(glm::vec3(-0.5f, 0.7f, 0.8f));
-    const glm::vec3 Hh = glm::normalize(L + glm::vec3(0, 0, 1));
-    const float pitch = 0.3f, cp = std::cos(pitch), sp = std::sin(pitch);
-
-    for (int f = 0; f < kFrames; ++f) {
-        const float yaw = 6.2831853f * f / kFrames, cy = std::cos(yaw), sy = std::sin(yaw);
-        std::fill(buf.begin(), buf.end(), Color{base.r, base.g, base.b, 0});
-        std::fill(zb.begin(), zb.end(), -1e30f);
-        for (size_t i = 0; i < mesh.vertices.size(); ++i) {
-            glm::vec3 p = mesh.vertices[i] - c;
-            glm::vec3 a(p.x * cy + p.z * sy, p.y, -p.x * sy + p.z * cy);   // yaw
-            glm::vec3 b(a.x, a.y * cp - a.z * sp, a.y * sp + a.z * cp);    // pitch
-            pv[i] = glm::vec3(R * 0.5f + b.x * scale, R * 0.5f - b.y * scale, b.z * scale);
-        }
-        for (size_t t = 0; t < triCount; t += stride) {
-            const glm::vec3 &A = pv[mesh.indices[t * 3]], &B = pv[mesh.indices[t * 3 + 1]], &C = pv[mesh.indices[t * 3 + 2]];
-            // view-space normal (screen y is flipped); sign is arbitrary so face the camera
-            glm::vec3 e1(B.x - A.x, A.y - B.y, B.z - A.z), e2(C.x - A.x, A.y - C.y, C.z - A.z);
-            glm::vec3 n = glm::cross(e1, e2);
-            float nl = glm::length(n);
-            if (nl < 1e-6f) continue;
-            n /= nl;
-            if (n.z < 0) n = -n;
-            float diff = std::max(0.0f, glm::dot(n, L));
-            float rimk = std::pow(1.0f - n.z, 2.0f) * 0.55f;
-            float spec = std::pow(std::max(0.0f, glm::dot(n, Hh)), 24.0f) * 0.35f;
-            float k = 0.22f + 0.85f * diff;
-            auto ch = [&](uint8_t bc, uint8_t rc) {
-                return (uint8_t)std::min(255.0f, bc * k + rc * rimk + 255.0f * spec);
-            };
-            Color col{ch(base.r, rim.r), ch(base.g, rim.g), ch(base.b, rim.b), 255};
-
-            int x0 = std::max(0, (int)std::floor(std::min({A.x, B.x, C.x})));
-            int x1 = std::min(R - 1, (int)std::ceil(std::max({A.x, B.x, C.x})));
-            int y0 = std::max(0, (int)std::floor(std::min({A.y, B.y, C.y})));
-            int y1 = std::min(R - 1, (int)std::ceil(std::max({A.y, B.y, C.y})));
-            float den = (B.y - C.y) * (A.x - C.x) + (C.x - B.x) * (A.y - C.y);
-            if (std::fabs(den) < 1e-8f) continue;
-            float inv = 1.0f / den;
-            for (int y = y0; y <= y1; ++y)
-                for (int x = x0; x <= x1; ++x) {
-                    float px = x + 0.5f, py = y + 0.5f;
-                    float w0 = ((B.y - C.y) * (px - C.x) + (C.x - B.x) * (py - C.y)) * inv;
-                    float w1 = ((C.y - A.y) * (px - C.x) + (A.x - C.x) * (py - C.y)) * inv;
-                    float w2 = 1.0f - w0 - w1;
-                    if (w0 < 0 || w1 < 0 || w2 < 0) continue;
-                    float z = w0 * A.z + w1 * B.z + w2 * C.z;
-                    int idx = y * R + x;
-                    if (z > zb[idx]) { zb[idx] = z; buf[idx] = col; }
-                }
-        }
-        // box downsample into the sheet
-        const int ox = (f % kCols) * kSprite, oy = (f / kCols) * kSprite;
-        for (int y = 0; y < kSprite; ++y)
-            for (int x = 0; x < kSprite; ++x) {
-                int r = 0, g = 0, b = 0, cnt = 0;
-                for (int j = 0; j < kSS; ++j)
-                    for (int i = 0; i < kSS; ++i) {
-                        const Color &p = buf[(y * kSS + j) * R + x * kSS + i];
-                        if (p.a) r += p.r, g += p.g, b += p.b, ++cnt;
-                    }
-                Color o{base.r, base.g, base.b, 0};
-                if (cnt) o = {(uint8_t)(r / cnt), (uint8_t)(g / cnt), (uint8_t)(b / cnt),
-                              (uint8_t)(255 * cnt / (kSS * kSS))};
-                sheet[(oy + y) * W + ox + x] = o;
-            }
+// "stanford-bunny (1)" -> "Stanford Bunny"
+std::string cleanName(std::string s) {
+    if (auto p = s.rfind('('); p != std::string::npos && s.back() == ')') {
+        bool digits = p + 2 < s.size();
+        for (size_t i = p + 1; i + 1 < s.size(); ++i) digits &= std::isdigit((unsigned char)s[i]) != 0;
+        if (digits) s.erase(p);
     }
+    std::string out;
+    bool startOfWord = true;
+    for (char ch : s) {
+        if (ch == '-' || ch == '_' || ch == '.' || std::isspace((unsigned char)ch)) {
+            startOfWord = true;
+            continue;
+        }
+        if (startOfWord && !out.empty()) out += ' ';
+        out += startOfWord ? (char)std::toupper((unsigned char)ch) : ch;
+        startOfWord = false;
+    }
+    return out;
 }
 
-void addSheet(const TriMesh &mesh, Color base, Color rim) {
-    if (mesh.vertices.empty() || mesh.indices.size() < 3) return;
-    std::vector<Color> pix(kCols * kSprite * kRows * kSprite);
-    renderSheet(mesh, base, rim, pix);
-    Image img{pix.data(), kCols * kSprite, kRows * kSprite, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
-    Texture2D tex = LoadTextureFromImage(img); // uploads a GPU copy; CPU pixels freed on return
-    SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
-    SetTextureWrap(tex, TEXTURE_WRAP_CLAMP);
-    gSheets.push_back(tex);
+struct Box { float x, y, w, h; };
+
+// page layout, shared by the offscreen render (size) and the drawing
+struct Layout {
+    float W, H, titleY, subY;
+    Box view;
+    float readY, menuY, footY;
+};
+
+Layout layout() {
+    Layout L;
+    L.W = (float)GetScreenWidth(), L.H = (float)GetScreenHeight();
+    L.titleY = 70.0f;
+    L.subY = L.titleY + 68.0f;
+    float top = L.subY + 50.0f, bottom = std::max(top + 120.0f, L.H - 170.0f);
+    L.view = {kMargin, top, std::max(120.0f, L.W - 2 * kMargin), bottom - top};
+    L.readY = bottom + 11.0f;
+    L.menuY = bottom + 42.0f;
+    L.footY = L.H - 44.0f;
+    return L;
 }
 
-ImU32 hsv(float h, float s, float v, float a) {
-    float r, g, b;
-    ImGui::ColorConvertHSVtoRGB(h - std::floor(h), s, v, r, g, b);
-    return IM_COL32((int)(r * 255), (int)(g * 255), (int)(b * 255), (int)(a * 255));
+Color toColor(ImU32 c, float alpha = 1.0f) {
+    return {(unsigned char)(c & 0xFF), (unsigned char)((c >> 8) & 0xFF), (unsigned char)((c >> 16) & 0xFF),
+            (unsigned char)(((c >> 24) & 0xFF) * alpha)};
 }
+ImU32 withAlpha(ImU32 c, float a) {
+    return (c & 0x00FFFFFFu) | ((ImU32)std::clamp(((c >> 24) & 0xFF) * a, 0.0f, 255.0f) << 24);
+}
+
+// same ramp as the pressure colours in render.cpp
+ImU32 jet(float t) {
+    auto ch = [&](float c) { return (int)(255 * std::clamp(1.5f - std::fabs(4.0f * t - c), 0.0f, 1.0f)); };
+    return IM_COL32(ch(3), ch(2), ch(1), 255);
+}
+
+float textW(ImFont *f, float size, const char *s) { return f->CalcTextSizeA(size, FLT_MAX, 0.0f, s).x; }
+
+// L-shaped registration marks on the corners of a box
+void cornerMarks(ImDrawList *dl, Box b, float len, ImU32 col) {
+    const float x0 = b.x - 0.5f, y0 = b.y - 0.5f, x1 = b.x + b.w + 0.5f, y1 = b.y + b.h + 0.5f;
+    dl->AddLine({x0, y0}, {x0 + len, y0}, col); dl->AddLine({x0, y0}, {x0, y0 + len}, col);
+    dl->AddLine({x1, y0}, {x1 - len, y0}, col); dl->AddLine({x1, y0}, {x1, y0 + len}, col);
+    dl->AddLine({x0, y1}, {x0 + len, y1}, col); dl->AddLine({x0, y1}, {x0, y1 - len}, col);
+    dl->AddLine({x1, y1}, {x1 - len, y1}, col); dl->AddLine({x1, y1}, {x1, y1 - len}, col);
+}
+
+int gMenuIndex = 0;
 
 } // namespace
 
 void titleInit() {
-    if (gInited) return;
-    gInited = true;
-
-    const Color palette[8][2] = {
-        {{90, 200, 255, 255}, {120, 255, 240, 255}},
-        {{255, 150, 90, 255}, {255, 230, 140, 255}},
-        {{170, 130, 255, 255}, {255, 140, 220, 255}},
-        {{110, 230, 160, 255}, {200, 255, 200, 255}},
-        {{255, 110, 150, 255}, {255, 190, 120, 255}},
-        {{140, 170, 255, 255}, {150, 255, 255, 255}},
-        {{240, 220, 120, 255}, {255, 255, 220, 255}},
-        {{120, 220, 220, 255}, {180, 200, 255, 255}},
-    };
-    int pi = 0;
-
-    std::vector<std::pair<std::string, uintmax_t>> files;
+    gEntries.clear();
+    std::vector<std::pair<std::filesystem::path, uintmax_t>> files;
     std::error_code ec;
     for (const auto &e : std::filesystem::directory_iterator(kSampleDir, ec)) {
-        if (e.path().extension() != ".obj") continue;
-        uintmax_t sz = e.file_size(ec);
-        bool dup = false;
-        for (auto &s : files) dup |= (s.second == sz);   // skips the duplicated bunny
-        if (!dup) files.emplace_back(e.path().string(), sz);
+        std::string ext = e.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".obj") files.emplace_back(e.path(), e.file_size(ec));
     }
     std::sort(files.begin(), files.end());
-    for (auto &s : files) {
-        TriMesh m;
-        if (!loadMesh(s.first, m)) continue;             // e.g. over 65535 verts
-        const Color *p = palette[pi++ % 8];
-        addSheet(m, p[0], p[1]);
+    for (auto &[path, size] : files) {
+        std::string name = cleanName(path.stem().string());
+        bool dup = name.empty();
+        for (const Entry &e : gEntries)
+            dup |= e.name == name || std::filesystem::file_size(e.path, ec) == size; // the duplicated bunny
+        if (dup) continue;
+        Entry e;
+        e.path = path.generic_string();
+        e.file = path.filename().string();
+        e.name = name;
+        gEntries.push_back(std::move(e));
     }
-    // (makeSphere/makeNacaWing/makeCar are declared but not implemented yet - add them here once they exist)
-    if (gSheets.empty()) return;
-
-    unsigned seed = 1234567u;
-    for (int i = 0; i < 16; ++i) {
-        Floater f;
-        f.sheet = i % (int)gSheets.size();
-        f.depth = 0.25f + 0.75f * frand(seed);
-        f.x = frand(seed);
-        f.y = 0.08f + 0.84f * frand(seed);
-        f.speed = 0.012f + 0.035f * f.depth;
-        f.bob = 6 + 20 * frand(seed);
-        f.bobSpeed = 0.4f + frand(seed);
-        f.spin = (frand(seed) < 0.5f ? -1.0f : 1.0f) * (3.0f + 5.0f * frand(seed));
-        f.phase = frand(seed) * kFrames;
-        f.tilt = (frand(seed) - 0.5f) * 30.0f;
-        gFloaters.push_back(f);
-    }
-    std::sort(gFloaters.begin(), gFloaters.end(), [](auto &a, auto &b) { return a.depth < b.depth; });
-    for (int i = 0; i < 45; ++i) {
-        Streak s;
-        s.x = frand(seed); s.y = frand(seed);
-        s.len = 80 + 220 * frand(seed);
-        s.speed = 0.08f + 0.18f * frand(seed);
-        s.alpha = 0.05f + 0.12f * frand(seed);
-        s.thick = 1.0f + 1.5f * frand(seed);
-        gStreaks.push_back(s);
-    }
+    if (!gUi) gUi = new UiState; // defaults: pressure colours and streamlines on
 }
 
 void titleShutdown() {
-    for (auto &t : gSheets) UnloadTexture(t);
-    gSheets.clear(); gFloaters.clear(); gStreaks.clear();
-    gInited = false;
+    if (gRT.id) UnloadRenderTexture(gRT);
+    gRT = {};
+    gEntries.clear();
+    delete gUi;
+    gUi = nullptr;
+}
+
+const TriMesh *titleSimNextModel() {
+    const double now = GetTime();
+    if (!gActive) { // (re)entered the welcome screen: build straight away
+        gActive = true;
+        gVisitLoaded = false;
+        gNextSwitch = now;
+    }
+    if (now < gNextSwitch || gEntries.empty()) return nullptr;
+
+    // fixed cadence; only re-anchor if we fell a whole period behind (e.g. a long stall)
+    gNextSwitch = gNextSwitch + kTitleModelSeconds > now ? gNextSwitch + kTitleModelSeconds : now + kTitleModelSeconds;
+
+    const int n = (int)gEntries.size();
+    for (int k = 1; k <= n; ++k) {
+        const int i = (gCurrent + k) % n;
+        Entry &e = gEntries[i];
+        if (e.bad) continue;
+        if (!e.loaded) {
+            e.loaded = true;
+            e.bad = !loadMesh(e.path, e.mesh) || e.mesh.indices.empty(); // e.g. over 65535 verts
+            if (e.bad) {
+                TraceLog(LOG_WARNING, "title: skipping %s", e.path.c_str());
+                continue;
+            }
+        }
+        if (i == gCurrent && gVisitLoaded) return nullptr; // only one usable model, keep its flow running
+        gCurrent = i;
+        gVisitLoaded = true;
+        gShownAt = now;
+        return &e.mesh;
+    }
+    gNextSwitch = INFINITY; // nothing loadable
+    return nullptr;
+}
+
+void titleSimLeave() {
+    gActive = false;
+    gVisitLoaded = false;
+}
+
+void titleSimRender(AppState &appState, Render3DState &cs) {
+    const Layout L = layout();
+    const int w = (int)L.view.w * kSS, h = (int)L.view.h * kSS;
+    if (gRT.id == 0 || gRT.texture.width != w || gRT.texture.height != h) {
+        if (gRT.id) UnloadRenderTexture(gRT);
+        gRT = LoadRenderTexture(w, h);
+        SetTextureFilter(gRT.texture, TEXTURE_FILTER_BILINEAR);
+    }
+
+    gYaw += kOrbit * GetFrameTime();
+    const Grid &g = cs.grid;
+    gGrid[0] = g.nx, gGrid[1] = g.ny, gGrid[2] = g.nz;
+
+    BeginTextureMode(gRT);
+    ClearBackground(toColor(pro::kPanel));
+    if (gVisitLoaded) {
+        // the scene is centred on the tunnel; aim a little upstream, toward the model (it sits at nx/4)
+        const Vector3 target = {-0.10f * g.nx, -0.10f * g.ny, 0.0f};
+        const float dist = 1.40f * g.nx, pitch = 0.42f;
+        const Camera saved = cs.camera;
+        cs.camera.target = target;
+        cs.camera.up = {0, 1, 0};
+        cs.camera.fovy = 40.0f;
+        cs.camera.projection = CAMERA_PERSPECTIVE;
+        cs.camera.position = {target.x + dist * std::cos(pitch) * std::sin(gYaw), target.y + dist * std::sin(pitch),
+                              target.z + dist * std::cos(pitch) * std::cos(gYaw)};
+        voxel_loop(appState, cs, *gUi);
+        cs.camera = saved; // the user's orbit camera is untouched
+    }
+    EndTextureMode();
 }
 
 void titleDraw() {
-    const float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
-    const float t = (float)GetTime();
-
-    DrawRectangleGradientV(0, 0, (int)W, (int)H, Color{6, 10, 24, 255}, Color{22, 12, 44, 255});
-    DrawCircleGradient((int)(W * (0.25f + 0.05f * std::sin(t * 0.2f))), (int)(H * 0.3f), W * 0.45f, Color{40, 90, 160, 55}, Color{0, 0, 0, 0});
-    DrawCircleGradient((int)(W * (0.78f + 0.05f * std::cos(t * 0.17f))), (int)(H * 0.75f), W * 0.5f, Color{140, 50, 140, 45}, Color{0, 0, 0, 0});
-
-    // wind streaks, blowing left to right
-    for (auto &s : gStreaks) {
-        float x = std::fmod(s.x + t * s.speed, 1.3f) - 0.15f;
-        float px = x * W, py = s.y * H + std::sin(t * 0.6f + s.y * 9.0f) * 8.0f;
-        DrawRectangleGradientH((int)(px - s.len), (int)py, (int)s.len, (int)s.thick,
-                               Color{150, 210, 255, 0}, Color{150, 210, 255, (unsigned char)(s.alpha * 255)});
-    }
-
-    // floating models: far ones first (gFloaters is sorted by depth)
-    const float tsz = (float)kSprite;
-    for (auto &f : gFloaters) {
-        float size = tsz * (0.9f + 1.5f * f.depth);
-        float x = std::fmod(f.x + t * f.speed, 1.0f);
-        float cx = -size + x * (W + 2 * size);
-        float cy = f.y * H + std::sin(t * f.bobSpeed + f.phase) * f.bob * f.depth;
-        int frame = ((int)std::floor(f.phase + t * f.spin) % kFrames + kFrames) % kFrames;
-        Rectangle src{(float)(frame % kCols) * tsz, (float)(frame / kCols) * tsz, tsz, tsz};
-        Rectangle dst{cx, cy, size, size};
-        unsigned char a = (unsigned char)(255 * (0.25f + 0.5f * f.depth));
-        DrawTexturePro(gSheets[f.sheet], src, dst, Vector2{size / 2, size / 2},
-                       f.tilt + std::sin(t * 0.3f + f.phase) * 6.0f, Color{255, 255, 255, a});
-    }
-    DrawRectangleGradientV(0, 0, (int)W, (int)(H * 0.25f), Color{0, 0, 0, 120}, Color{0, 0, 0, 0});
-    DrawRectangleGradientV(0, (int)(H * 0.75f), (int)W, (int)(H * 0.25f + 1), Color{0, 0, 0, 0}, Color{0, 0, 0, 140});
-
-    // logo, drawn per letter with glow (ImGui draw list so any font size works)
+    const Layout L = layout();
+    const float W = L.W, H = L.H;
+    const double now = GetTime();
     ImDrawList *dl = ImGui::GetBackgroundDrawList();
-    ImFont *font = ImGui::GetFont();
-    const char *title = "wing-it";
-    const int n = 7;
-    const float size = std::clamp(W * 0.17f, 60.0f, 170.0f);
-    float adv[n], total = 0;
-    for (int i = 0; i < n; ++i) {
-        adv[i] = font->CalcTextSizeA(size, FLT_MAX, 0.0f, title + i, title + i + 1).x;
-        total += adv[i];
+
+    // background + faint drafting grid
+    DrawRectangle(0, 0, (int)W, (int)H, toColor(pro::kBg));
+    for (int x = 0, i = 0; x < (int)W; x += 24, ++i)
+        DrawRectangle(x, 0, 1, (int)H, toColor(pro::kGridLine, i % 4 ? 0.55f : 1.0f));
+    for (int y = 0, i = 0; y < (int)H; y += 24, ++i)
+        DrawRectangle(0, y, (int)W, 1, toColor(pro::kGridLine, i % 4 ? 0.55f : 1.0f));
+
+    // header strip
+    dl->AddText(gFontMono, 12.0f, {kMargin, 19}, pro::kTextDim, "WING-IT");
+    dl->AddText(gFontMono, 12.0f, {kMargin + textW(gFontMono, 12.0f, "WING-IT") + 14, 19}, pro::kTextFaint,
+                "VIRTUAL WIND TUNNEL");
+    {
+        const char *r = "REAL-TIME CFD";
+        dl->AddText(gFontMono, 12.0f, {W - kMargin - textW(gFontMono, 12.0f, r), 19}, pro::kTextFaint, r);
     }
-    float x = (W - total) * 0.5f;
-    const float baseY = H * 0.14f;
-    for (int i = 0; i < n; ++i) {
-        float y = baseY + std::sin(t * 1.6f + i * 0.6f) * 7.0f;
-        float hue = 0.52f + 0.22f * (float)i / (n - 1) + 0.04f * std::sin(t * 0.7f);
-        for (int ring = 1; ring <= 3; ++ring) {
-            float r = ring * 3.5f;
-            ImU32 gc = hsv(hue, 0.7f, 1.0f, 0.10f / ring);
-            for (int k = 0; k < 8; ++k) {
-                float ang = k * 0.785398f;
-                dl->AddText(font, size, ImVec2(x + std::cos(ang) * r, y + std::sin(ang) * r), gc, title + i, title + i + 1);
+    dl->AddLine({kMargin, 44.5f}, {W - kMargin, 44.5f}, pro::kHairline);
+
+    // "Aerodynamics of a <Name>", the name fades out/in around each switch
+    const Entry *cur = gCurrent >= 0 && gVisitLoaded ? &gEntries[gCurrent] : nullptr;
+    const std::string name = cur ? cur->name : "";
+    const bool vowel = !name.empty() && std::string("AEIOU").find(name[0]) != std::string::npos;
+    const std::string prefix = vowel ? "Aerodynamics of an " : "Aerodynamics of a ";
+    const float ts = 54.0f;
+    const float nameTarget = name.empty() ? textW(gFontLight, ts, "Model") : textW(gFontLight, ts, name.c_str());
+    if (gNameW < 0) gNameW = nameTarget;
+    gNameW += (nameTarget - gNameW) * (1.0f - std::exp(-8.0f * GetFrameTime()));
+    const float prefixW = textW(gFontLight, ts, prefix.c_str());
+    const float tx = std::round((W - prefixW - gNameW) * 0.5f);
+    dl->AddText(gFontLight, ts, {tx, L.titleY}, pro::kText, prefix.c_str());
+
+    float nameA = 0.0f;
+    if (cur) {
+        const float in = std::clamp((float)(now - gShownAt) / kFade, 0.0f, 1.0f);
+        const float out = std::isfinite(gNextSwitch) ? std::clamp((float)(gNextSwitch - now) / kFade, 0.0f, 1.0f) : 1.0f;
+        nameA = std::min(in, out);
+        nameA = nameA * nameA * (3 - 2 * nameA);
+    }
+    const float nx = tx + prefixW;
+    if (cur) dl->AddText(gFontLight, ts, {nx, L.titleY - 4.0f * (1.0f - nameA)}, withAlpha(IM_COL32(236, 241, 246, 255), nameA), name.c_str());
+    // the "blank": a hairline under the name slot
+    const float lineY = std::round(L.titleY + ts * 1.08f) + 0.5f;
+    dl->AddLine({nx, lineY}, {nx + gNameW, lineY}, pro::kHairline);
+    dl->AddLine({nx, lineY}, {nx + gNameW * nameA, lineY}, withAlpha(pro::kAccent, 0.9f));
+
+    {
+        const char *sub = "Live D3Q19 lattice-Boltzmann flow, solved in real time";
+        const float ss = 20.0f;
+        dl->AddText(gFontBody, ss, {std::round((W - textW(gFontBody, ss, sub)) * 0.5f), L.subY}, pro::kTextDim, sub);
+    }
+
+    // simulation viewport
+    const Box v = L.view;
+    if (gRT.id && gVisitLoaded)
+        DrawTexturePro(gRT.texture, {0, 0, (float)gRT.texture.width, -(float)gRT.texture.height}, {v.x, v.y, v.w, v.h},
+                       {0, 0}, 0.0f, WHITE); // render textures are stored upside down
+    else
+        DrawRectangle((int)v.x, (int)v.y, (int)v.w, (int)v.h, toColor(pro::kPanel));
+    dl->AddRect({v.x - 0.5f, v.y - 0.5f}, {v.x + v.w + 0.5f, v.y + v.h + 0.5f}, pro::kHairline);
+    cornerMarks(dl, v, 9.0f, withAlpha(pro::kAccent, 0.8f));
+
+    // overlay labels
+    const float ms = 12.0f;
+    dl->AddText(gFontMono, ms, {v.x + 12, v.y + 10}, pro::kTextDim, "FLOW  +X");
+    dl->AddLine({v.x + 12 + textW(gFontMono, ms, "FLOW  +X") + 8, v.y + 17.5f},
+                {v.x + 12 + textW(gFontMono, ms, "FLOW  +X") + 40, v.y + 17.5f}, pro::kTextDim);
+    {
+        const char *r = "PRESSURE COLOUR  /  STREAMLINES";
+        dl->AddText(gFontMono, ms, {v.x + v.w - 12 - textW(gFontMono, ms, r), v.y + 10}, pro::kTextFaint, r);
+    }
+    // pressure scale, bottom right
+    {
+        const float bw = 120, bh = 5, bx = v.x + v.w - 12 - bw, by = v.y + v.h - 24;
+        const int seg = 24;
+        dl->AddRectFilled({bx - 56, by - 10}, {v.x + v.w - 4, by + bh + 20}, withAlpha(pro::kPanel, 0.85f), 2.0f);
+        for (int i = 0; i < seg; ++i)
+            dl->AddRectFilledMultiColor({bx + bw * i / seg, by}, {bx + bw * (i + 1) / seg, by + bh},
+                                        jet((float)i / seg), jet((float)(i + 1) / seg), jet((float)(i + 1) / seg), jet((float)i / seg));
+        dl->AddRect({bx - 0.5f, by - 0.5f}, {bx + bw + 0.5f, by + bh + 0.5f}, withAlpha(IM_COL32(0, 0, 0, 255), 0.6f));
+        dl->AddText(gFontMono, 11.0f, {bx - textW(gFontMono, 11.0f, "p  LOW") - 8, by - 4}, pro::kTextDim, "p  LOW");
+        dl->AddText(gFontMono, 11.0f, {bx + bw - textW(gFontMono, 11.0f, "HIGH"), by + bh + 3}, pro::kTextFaint, "HIGH");
+    }
+    if (!gVisitLoaded) {
+        const char *m = gEntries.empty() ? "NO SAMPLE MODELS FOUND" : "INITIALISING SOLVER";
+        dl->AddText(gFontMono, ms, {std::round(v.x + (v.w - textW(gFontMono, ms, m)) * 0.5f), v.y + v.h * 0.5f - 6}, pro::kTextDim, m);
+    }
+    // time until the next model, as a hairline along the bottom edge
+    if (cur && std::isfinite(gNextSwitch)) {
+        const float p = std::clamp((float)((now - gShownAt) / (gNextSwitch - gShownAt)), 0.0f, 1.0f);
+        dl->AddLine({v.x, v.y + v.h + 0.5f}, {v.x + v.w * p, v.y + v.h + 0.5f}, withAlpha(pro::kAccent, 0.7f));
+    }
+
+    // readouts under the viewport
+    {
+        char buf[160];
+        float x = v.x;
+        auto field = [&](const char *label, const char *value) {
+            dl->AddText(gFontMono, ms, {x, L.readY}, pro::kTextFaint, label);
+            x += textW(gFontMono, ms, label) + 8;
+            dl->AddText(gFontMono, ms, {x, L.readY}, pro::kText, value);
+            x += textW(gFontMono, ms, value) + 28;
+        };
+        field("MODEL", cur ? cur->file.c_str() : "--");
+        snprintf(buf, sizeof buf, "%d x %d x %d", gGrid[0], gGrid[1], gGrid[2]);
+        field("GRID", cur ? buf : "--");
+        const float cd = solverForces({}, {}).cd;
+        snprintf(buf, sizeof buf, "%.3f", cd);
+        field("Cd", cur && now - gShownAt > 1.0 && std::isfinite(cd) ? buf : "--");
+
+        int usable = 0, idx = 0;
+        for (int i = 0; i < (int)gEntries.size(); ++i)
+            if (!gEntries[i].bad) {
+                ++usable;
+                if (i == gCurrent) idx = usable;
             }
-        }
-        dl->AddText(font, size, ImVec2(x + 3, y + 5), IM_COL32(0, 0, 0, 120), title + i, title + i + 1);
-        dl->AddText(font, size, ImVec2(x, y), hsv(hue, 0.45f, 1.0f, 1.0f), title + i, title + i + 1);
-        x += adv[i];
+        snprintf(buf, sizeof buf, "%02d / %02d", cur ? idx : 0, usable);
+        dl->AddText(gFontMono, ms, {v.x + v.w - textW(gFontMono, ms, buf), L.readY}, pro::kTextFaint, buf);
     }
-    const char *sub = "a pocket wind tunnel";
-    const float ss = std::clamp(W * 0.028f, 16.0f, 28.0f);
-    ImVec2 sz = font->CalcTextSizeA(ss, FLT_MAX, 0.0f, sub);
-    dl->AddText(font, ss, ImVec2((W - sz.x) * 0.5f, baseY + size * 1.12f),
-                IM_COL32(190, 215, 255, (int)(150 + 60 * std::sin(t * 1.2f))), sub);
+
+    // footer
+    dl->AddLine({kMargin, L.footY + 0.5f}, {W - kMargin, L.footY + 0.5f}, pro::kHairline);
+    dl->AddText(gFontBody, 14.0f, {kMargin, L.footY + 13}, pro::kTextFaint, "D3Q19 Lattice Boltzmann  \xC2\xB7  wind tunnel");
+    {
+        const char *r = "PRESS ENTER TO BEGIN";
+        dl->AddText(gFontMono, 12.0f, {W - kMargin - textW(gFontMono, 12.0f, r), L.footY + 15}, pro::kTextFaint, r);
+    }
 }
 
+// --- menu: one centred row of flat buttons, the first one filled with the accent ---
+
 void titleMenuBegin() {
-    const float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
-    ImGui::SetNextWindowPos(ImVec2(W * 0.5f, H * 0.62f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2(260, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 22.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 14));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.5f);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.30f, 0.55f, 0.55f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.55f, 0.90f, 0.85f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.70f, 1.00f, 1.00f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.55f, 0.80f, 1.00f, 0.6f));
+    const Layout L = layout();
+    gMenuIndex = 0;
+    ImGui::SetNextWindowPos(ImVec2(L.W * 0.5f, L.menuY), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(12, 0));
     ImGui::Begin("TitleMenu", nullptr,
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::PushFont(gFontMedium, 14.0f);
 }
 
 bool titleMenuButton(const char *label) {
-    return ImGui::Button(label, ImVec2(-FLT_MIN, 48));
+    // small caps look: upper-case the visible part, keep any "##id" suffix as is
+    std::string vis(label);
+    const size_t hash = vis.find("##");
+    std::transform(vis.begin(), hash == std::string::npos ? vis.end() : vis.begin() + hash, vis.begin(), ::toupper);
+    if (vis != label && hash == std::string::npos) vis += std::string("###") + label;
+
+    const bool primary = gMenuIndex++ == 0;
+    if (!primary) ImGui::SameLine();
+    const ImVec4 accent = ImGui::ColorConvertU32ToFloat4(pro::kAccent);
+    if (primary) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(accent.x * 0.85f, accent.y * 0.85f, accent.z * 0.85f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, accent);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(accent.x * 0.7f, accent.y * 0.7f, accent.z * 0.7f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(accent.x, accent.y, accent.z, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.97f, 0.98f, 1.0f, 1.0f));
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(withAlpha(pro::kPanel, 0.9f)));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.14f, 0.17f, 0.21f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(accent.x, accent.y, accent.z, 0.35f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(pro::kHairline));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(pro::kText));
+    }
+    const bool pressed = ImGui::Button(vis.c_str(), ImVec2(196, 40));
+    ImGui::PopStyleColor(5);
+    return pressed;
 }
 
 void titleMenuEnd() {
+    ImGui::PopFont();
     ImGui::End();
-    ImGui::PopStyleColor(4);
-    ImGui::PopStyleVar(3);
+    ImGui::PopStyleVar(4);
 }

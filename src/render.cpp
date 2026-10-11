@@ -223,7 +223,8 @@ void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState
     static std::vector<Vector3> velTarget, velShown;
     static float lo = 1, hi = 1, loShown = 1, hiShown = 1;
     static int framesSinceSample = 1 << 30;
-    if (++framesSinceSample >= 2) {
+    // resample right away when the mesh or grid changed size, the old arrays don't match nSurf / nSlice anymore
+    if (++framesSinceSample >= 2 || rhoTarget.size() != nSurf + nSlice) {
         framesSinceSample = 0;
         solverSnapshot(out);
         if (!out.ux.empty()) {
@@ -249,7 +250,7 @@ void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState
     }
 
     float ease = 1.0f - expf(-4.0f * GetFrameTime());
-    for (size_t i = 0; i < rhoShown.size(); ++i) {
+    for (size_t i = 0; i < std::min(rhoShown.size(), rhoTarget.size()); ++i) {
         rhoShown[i] += (rhoTarget[i] - rhoShown[i]) * ease;
         velShown[i] = Vector3Lerp(velShown[i], velTarget[i], ease);
     }
@@ -257,7 +258,7 @@ void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState
     hiShown += (hi - hiShown) * ease;
     // pressure is rho / 3 in LBM, so normalizing rho gives the same colour ramp
     auto shade = [&](size_t i) { return jet((rhoShown[i] - loShown) / std::max(hiShown - loShown, 1e-6f)); };
-    bool haveFlow = !rhoShown.empty();
+    bool haveFlow = !rhoShown.empty() && rhoShown.size() == nSurf + nSlice && rhoTarget.size() == nSurf + nSlice;
 
     if (haveFlow && meshModel.meshCount > 0) {
         Mesh &m = meshModel.meshes[0];

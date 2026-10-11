@@ -14,6 +14,7 @@
 #include "title.hpp"
 #include "server.hpp"
 #include "models.hpp"
+#include "style.hpp"
 
 ImFont* bodyFont = nullptr;
 
@@ -22,7 +23,7 @@ int main() {
     const auto uiState = new UiState;
     const auto cameraState = new Render3DState;
 
-    InitWindow(appState->window.width, appState->window.height, "kill me :)");
+    InitWindow(appState->window.width, appState->window.height, "wing-it  -  wind tunnel");
     rlImGuiSetup(true);
     titleInit();
 
@@ -37,8 +38,10 @@ int main() {
     if (bodyFont) {
         io.FontDefault = bodyFont;
     }
+    loadProFonts();
 
     ImPlot::CreateContext();
+    applyProStyle();
     printf("got here! grid.nx: %d, grid.ny: %d\n", cameraState->grid.nx, cameraState->grid.ny);
 
     // uiState->models holds model IDs (paths, see models.hpp); show modelLabel(id) in the UI
@@ -83,18 +86,39 @@ int main() {
 
     while (!WindowShouldClose() && !appState->shouldQuit) {
         BeginDrawing();
-        ClearBackground(BLACK);
+        ClearBackground(Color{13, 16, 20, 255}); // graphite, matches the UI style
         key_loop(*appState, *uiState);
         if (appState->screen == APP_SCREEN_UI || appState->screen == APP_SCREEN_MP_BATTLE) {
             camera_loop(*appState, *cameraState);
             voxel_loop(*appState, *cameraState, *uiState);
+        } else if (appState->screen == APP_SCREEN_WELCOME) {
+            titleSimRender(*appState, *cameraState); // drawn into the title page by titleDraw
         }
         ui_loop(*appState, *uiState);
         EndDrawing();
 
-        // no point simulating behind the menus
-        if (appState->screen != APP_SCREEN_UI && appState->screen != APP_SCREEN_MP_BATTLE && solverRunning)
+        // no point simulating behind the menus (the title screen runs its own small live sim)
+        if (appState->screen != APP_SCREEN_UI && appState->screen != APP_SCREEN_MP_BATTLE &&
+            appState->screen != APP_SCREEN_WELCOME && solverRunning)
             stopSolver();
+
+        // title screen: cycle the sample models through a small tunnel, see title.hpp
+        if (appState->screen == APP_SCREEN_WELCOME) {
+            if (const TriMesh *next = titleSimNextModel()) {
+                stopSolver();
+                rawMesh = *next;
+                const int keepGrid = uiState->gridSize;
+                const glm::vec3 keepRot = uiState->rotation;
+                const float keepAoa = uiState->params.aoaDeg;
+                uiState->gridSize = kTitleGridSize, uiState->rotation = glm::vec3(0.0f), uiState->params.aoaDeg = 0.0f;
+                buildModel();
+                uiState->gridSize = keepGrid, uiState->rotation = keepRot, uiState->params.aoaDeg = keepAoa;
+                cameraState->lines.clear();
+                startSolver();
+            }
+        } else {
+            titleSimLeave();
+        }
 
         if (uiState->modelChosen) {
             uiState->modelChosen = false;
