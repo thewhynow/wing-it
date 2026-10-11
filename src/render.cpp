@@ -129,6 +129,7 @@ static void traceLines(const FlowField &out, const Grid &g, std::vector<Streamli
         }
     }
 
+    lines.resize(l); // grid may have shrunk, drop seeds that no longer exist
     float range = rhoMax - rhoMin;
     for (size_t i = 0; i < rhos.size(); ++i) {
         Streamline &sl = lines[i];

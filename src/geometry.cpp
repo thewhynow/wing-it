@@ -225,8 +225,8 @@ void voxelize(const TriMesh& mesh, Grid& grid){
 
         if (std::abs(d) < 1e-12) continue; /* edge-on to the ray, can't be hit */
 
-        for (int k = k0; k < k1; ++k){
-            for (int j = j0; j < j1; ++j){
+        for (int k = k0; k <= k1; ++k){
+            for (int j = j0; j <= j1; ++j){
                 /* point within the bounding box that we are testing */
                 float py = j + 0.5f + 1e-4f;
                 float pz = k + 0.5f + 1.7e-4f;
@@ -236,33 +236,31 @@ void voxelize(const TriMesh& mesh, Grid& grid){
                 ;
                 float wC = 1.0f - wA - wB;
 
-                if (wA < 0.f && wB < 0.f && wC < 0.f)
+                if (wA < 0.f || wB < 0.f || wC < 0.f)
                     continue; /* ray missed */
 
                 float x = wA * a.x + wB * b.x + wC * c.x; /* where it hit */
                 hits[j + (size_t)grid.ny * k].push_back(x);
             }
         }
+    }
 
-        /* now sort the hits */
+    /* now that every triangle is in, sort the hits and fill between in/out pairs */
 
-        for (int k = k0; k < k1; ++k){
-            for (int j = j0; j < j1; ++j){
-                std::vector<float> &h = hits[j + (size_t)grid.ny * k];
+    for (int k = 0; k < grid.nz; ++k){
+        for (int j = 0; j < grid.ny; ++j){
+            std::vector<float> &h = hits[j + (size_t)grid.ny * k];
 
-                /* empty model or leaky mesh */
-                if (h.empty() || h.size() % 2) continue;
+            /* an odd count means a leaky mesh, the lone last hit just gets ignored */
+            std::sort(h.begin(), h.end());
 
-                std::sort(h.begin(), h.end());
+            for (size_t p = 0; p + 1 < h.size(); p += 2){
+                /* range for that point in the YZ plane */
+                int i0 = std::max(0, (int)std::ceil(h[p] - 0.5f));
+                int i1 = std::min(grid.nx - 1, (int)std::ceil(h[p + 1] - 0.5f) - 1);
 
-                for (size_t p = 0; p + 1 < h.size(); p += 2){
-                    /* range for that point in the YZ plane */
-                    int i0 = std::max(0, (int)std::ceil(h[p] - 0.5f));
-                    int i1 = std::min(grid.nx - 1, (int)std::ceil(h[p + 1] - 0.5f) - 1);
-
-                    for (int i = i0; i <= i1; ++i)
-                        grid.solid[i + (size_t)grid.nx * (j + (size_t)grid.ny * k)] = 1;
-                }
+                for (int i = i0; i <= i1; ++i)
+                    grid.solid[i + (size_t)grid.nx * (j + (size_t)grid.ny * k)] = 1;
             }
         }
     }

@@ -2,6 +2,7 @@
 // Person 4
 #include "common.hpp"
 #include <atomic>
+#include <string>
 
 enum AppScreen {
     APP_SCREEN_WELCOME,
@@ -28,8 +29,12 @@ struct UiState {
     float slicePos = 0.5f;
     bool paused = false, reset = false;
     glm::vec3 rotation{0.0f}; // model rotation in degrees about x, y, z
-    bool rotationChanged = false; // set when a slider is let go, main re-voxelizes
+    bool modelChanged = false; // set when a slider is let go, main re-voxelizes
+    int gridSize = 80; // tunnel is 2n long and n x n across
     bool showColors = true, showLines = true;
+    std::vector<std::string> models; // .obj files in assets/models
+    bool modelChosen = false; // set by Start, main loads models[model]
+    std::string modelError;
 };
 
 // TODO: create functions to initialise UI ticks

@@ -15,7 +15,7 @@ void solverReset(const Grid& grid, const SimParams& params) {
 	f_in.resize(grid.nx * grid.ny * grid.nz * 19, 0.f);
 	f_out.resize(grid.nx * grid.ny * grid.nz * 19, 0.f);
 
-	float rho = 1.0f;
+	float rho = params.inletRho;
 	float u = params.inletU;
 	float v = 0.0f;
 	float w = 0.0f;
@@ -55,7 +55,7 @@ void solverStep(const Grid& grid, const SimParams& params) {
 				w /= rho;
 
 				if (x == 0) {
-					rho = 1.f;
+					rho = params.inletRho;
 					u = params.inletU;
 					v = 0.f;
 					w = 0.f;
@@ -154,9 +154,9 @@ Forces solverForces(const Grid& grid, const SimParams& params) {
 
 	float frontalArea = calculateFrontalArea(grid);
 
-	float cd = (2 * F.x) / (1.0f * params.inletU * params.inletU * frontalArea);
-	float cl = (2 * F.y) / (1.0f * params.inletU * params.inletU * frontalArea);
-	float cz = (2 * F.z) / (1.0f * params.inletU * params.inletU * frontalArea);
+	float cd = (2 * F.x) / (params.inletRho * params.inletU * params.inletU * frontalArea);
+	float cl = (2 * F.y) / (params.inletRho * params.inletU * params.inletU * frontalArea);
+	float cz = (2 * F.z) / (params.inletRho * params.inletU * params.inletU * frontalArea);
 
 	return Forces{F, cd, cl, cz, frontalArea};
 };
