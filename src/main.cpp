@@ -128,6 +128,7 @@ int main() {
                 uiState->rotation = glm::vec3(0.0f);
                 uiState->params.aoaDeg = 0.0f;
                 buildModel();
+                cameraState->lines.clear(); // don't morph the previous (e.g. title) streamlines
                 startSolver();
                 appState->screen = APP_SCREEN_UI;
             } else {

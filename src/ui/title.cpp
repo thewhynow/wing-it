@@ -297,7 +297,7 @@ void titleDraw() {
     {
         const float bw = 120, bh = 5, bx = v.x + v.w - 12 - bw, by = v.y + v.h - 24;
         const int seg = 24;
-        dl->AddRectFilled({bx - 56, by - 10}, {v.x + v.w - 4, by + bh + 20}, withAlpha(pro::kPanel, 0.85f), 2.0f);
+        dl->AddRectFilled({bx - 56, by - 10}, {v.x + v.w - 3, v.y + v.h - 3}, withAlpha(pro::kPanel, 0.85f), 2.0f);
         for (int i = 0; i < seg; ++i)
             dl->AddRectFilledMultiColor({bx + bw * i / seg, by}, {bx + bw * (i + 1) / seg, by + bh},
                                         jet((float)i / seg), jet((float)(i + 1) / seg), jet((float)(i + 1) / seg), jet((float)i / seg));
