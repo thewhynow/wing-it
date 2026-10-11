@@ -3,7 +3,10 @@
 # Release ("Build 1", "Build 2", ...) with the packaged builds attached.
 # Pull requests are built and tested but never released.
 #
-# Packaging comes from packaging/packaging.cmake (included at the end of CMakeLists.txt).
+# Packaging needs include(packaging/packaging.cmake) as the last line of
+# CMakeLists.txt. Each release then has one download per platform:
+#   WingIt-Windows.zip (Wing It.exe), WingIt-macOS.zip (Wing It.app),
+#   WingIt-Linux.tar.gz (WingIt).
 #
 # Caching:
 #   - Dependencies downloaded by FetchContent (raylib, json, glm, ...) are kept
@@ -56,7 +59,7 @@ jobs:
             os: macos-latest          # Apple Silicon (arm64)
             c_compiler: clang
             cpp_compiler: clang++
-            cpack_generator: ZIP
+            cpack_generator: ZIP      # Finder unzips straight to "Wing It.app"
             package: true
             cmake_args: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           - name: windows-msvc
@@ -214,7 +217,8 @@ jobs:
           merge-multiple: true
 
       # Each run gets its own tag (build-1, build-2, ...) pointing at the commit
-      # that was built. Release notes list the commits since the previous build.
+      # that was built. The body tells players which file to download; the list
+      # of commits since the previous build is added below it.
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
@@ -223,11 +227,14 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: dist/*
           generate_release_notes: true
-          body: |
-            ## Which file do I download?
-            GitHub always adds two "Source code" downloads below - ignore those, they are not the game.
-            - **Windows:** `WingIt-Windows.zip`
-            - **macOS:** `WingIt-macOS.zip`
-            - **Linux:** `WingIt-Linux.tar.gz`
-          prerelease: ${{ contains(github.ref_name, '-') }}   # v1.0.0-beta → pre-release
           make_latest: true
+          body: |
+            ## Download
+
+            Pick the file for your computer under **Assets** below. (The "Source code" files are added by GitHub to every release; you don't need them.)
+
+            | | File | Then |
+            |---|---|---|
+            | **Windows** | `WingIt-Windows.zip` | Right-click → **Extract All**, open the folder, run **Wing It.exe**. If Windows says it protected your PC, click **More info → Run anyway**. |
+            | **macOS** (Apple Silicon) | `WingIt-macOS.zip` | Double-click to unzip, then open **Wing It.app**. The first time, macOS blocks it: go to **System Settings → Privacy & Security** and click **Open Anyway**. |
+            | **Linux** | `WingIt-Linux.tar.gz` | Extract it and run `./WingIt` in the `WingIt-Linux` folder. |
