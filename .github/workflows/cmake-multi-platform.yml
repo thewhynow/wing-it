@@ -40,6 +40,9 @@ jobs:
             cpp_compiler: cl
             cpack_generator: ZIP
             package: true
+            # Static curl from vcpkg, linked against the normal (DLL) MSVC runtime,
+            # so the release zip doesn't need extra curl DLLs next to the .exe.
+            cmake_args: -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           - name: linux-gcc
             os: ubuntu-latest
             c_compiler: gcc
@@ -56,7 +59,8 @@ jobs:
       - uses: actions/checkout@v6
 
       # raylib builds GLFW from source, which needs the X11 / OpenGL development
-      # headers. GitHub's Ubuntu runners don't include them.
+      # headers; find_package(CURL) needs the libcurl development package.
+      # GitHub's Ubuntu runners include neither.
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -64,7 +68,16 @@ jobs:
           sudo apt-get install -y \
             libasound2-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev \
-            libwayland-dev libxkbcommon-dev
+            libwayland-dev libxkbcommon-dev \
+            libcurl4-openssl-dev
+
+      # Windows has no curl development package either. vcpkg is preinstalled on
+      # GitHub's Windows runners; this builds curl and points CMake at it.
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install curl:x64-windows-static-md
+          "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure CMake
         run: >
@@ -72,6 +85,7 @@ jobs:
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          ${{ matrix.cmake_args }}
 
       # Your build command, plus --config so Windows (Visual Studio generator,
       # multi-config) builds Release instead of its default Debug.
