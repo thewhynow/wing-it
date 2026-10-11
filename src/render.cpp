@@ -105,7 +105,7 @@ static void traceLines(const FlowField &out, const Grid &g, std::vector<Streamli
                 rhos.back().push_back(r);
 
                 // only keep lines that get bent or sped up / slowed down by the model
-                if (Vector3Distance(vel, freeVel) > 0.1f * Vector3Length(freeVel))
+                if (Vector3Distance(vel, freeVel) > 0.15f * Vector3Length(freeVel))
                     interesting = true;
 
                 float speed = Vector3Length(vel);
