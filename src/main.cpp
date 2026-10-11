@@ -32,8 +32,8 @@ int main() {
     // we need to start by creating a vertex at the middle of every element
     std::vector<Vector2> morecoords;
     morecoords.reserve(cameraState->grid.nx * cameraState->grid.ny);
-    for (int x = -(cameraState->grid.nx/2); x < (cameraState->grid.nx/2)-1; x++) {
-        for (int y = -(cameraState->grid.ny/2); y < (cameraState->grid.ny/2)-1; y++) {
+    for (int x = -(cameraState->grid.nx/2); x < cameraState->grid.nx - cameraState->grid.nx/2; x++) {
+        for (int y = -(cameraState->grid.ny/2); y < cameraState->grid.ny - cameraState->grid.ny/2; y++) {
             morecoords.push_back(Vector2(x, y));
         }
     }
