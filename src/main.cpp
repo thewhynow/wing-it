@@ -8,12 +8,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "render.hpp"
 #include "ui.hpp"
-<<<<<<< Updated upstream
 #include "geometry.hpp"
 #include "solver.hpp"
-=======
 #include "server.hpp"
->>>>>>> Stashed changes
 
 ImFont* bodyFont = nullptr;
 
@@ -122,11 +119,8 @@ int main() {
 
     threadRunning = false;
     timerThread.join();
-<<<<<<< Updated upstream
     stopSolver();
-=======
     stop_server_thread();
->>>>>>> Stashed changes
 
     ImPlot::DestroyContext();
     rlImGuiShutdown();
