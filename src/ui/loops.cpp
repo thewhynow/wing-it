@@ -8,6 +8,10 @@
 
 #include "raylib.h"
 #include "ui.hpp"
+#include "title.hpp"
+#include "solver.hpp"
+#include <implot.h>
+#include "multiplayer.hpp"
 #include "GLFW/glfw3.h"
 
 void time_thread(AppState& appState, std::atomic<bool>& running) {
@@ -27,6 +31,7 @@ void time_thread(AppState& appState, std::atomic<bool>& running) {
 }
 
 void key_loop(AppState& appState, UiState& uiState) {
+    if (ImGui::GetIO().WantTextInput) return; // typing in a text box (multiplayer name / IP) must not trigger hotkeys
     if (IsKeyPressed(KEY_A)) {
         appState.shouldQuit = true;
         return;
@@ -58,22 +63,12 @@ void ui_loop(AppState& appState, UiState& uiState) {
     ImVec2 screenCenter = ImVec2(GetScreenWidth() * 0.5f, GetScreenHeight() * 0.5f);
 
     if (appState.screen == APP_SCREEN_WELCOME) {
-        // ImVec2(0.5f, 0.5f) pivot centers the window right on screenCenter
-        ImGui::SetNextWindowPos(screenCenter, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        ImGui::Begin("TitleWindow", nullptr,
-            ImGuiWindowFlags_NoDecoration |
-            ImGuiWindowFlags_AlwaysAutoResize |
-            ImGuiWindowFlags_NoBackground);
-
-        ImGui::SetWindowFontScale(3.0f); // Scaled title text
-        ImGui::Text("Wing It!");
-        ImGui::SetWindowFontScale(1.0f); // Reset font scale for subsequent text
-        ImGui::TextDisabled("a pocket wind tunnel");
-        ImGui::Spacing();
-        if (ImGui::Button("Enter", ImVec2(-FLT_MIN, 0)) || IsKeyPressed(KEY_ENTER))
+        titleDraw();
+        titleMenuBegin();
+        if (titleMenuButton("Enter") || IsKeyPressed(KEY_ENTER))
             appState.screen = APP_SCREEN_SELECT_MODEL;
-
-        ImGui::End();
+        // add more title menu buttons here, e.g. if (titleMenuButton("Multiplayer")) ...
+        titleMenuEnd();
     } else if (appState.screen == APP_SCREEN_SELECT_MODEL) {
         ImGui::SetNextWindowPos(screenCenter, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::Begin("Pick a model", nullptr,
@@ -93,10 +88,15 @@ void ui_loop(AppState& appState, UiState& uiState) {
         if (ImGui::Button("Back"))
             appState.screen = APP_SCREEN_WELCOME;
         ImGui::SameLine();
+        if (ImGui::Button("Multiplayer")) // MP: 2-player battle
+            mpEnter(appState);
+        ImGui::SameLine();
         if (ImGui::Button("Start", ImVec2(-FLT_MIN, 0)) || IsKeyPressed(KEY_ENTER))
             uiState.modelChosen = !uiState.models.empty();
 
         ImGui::End();
+    } else if (appState.screen >= APP_SCREEN_MP_LOBBY) {
+        mpDrawUi(appState, uiState); // MP: lobby / pick / battle HUD / result
     }
 
     if (appState.screen != APP_SCREEN_UI) {
@@ -106,6 +106,23 @@ void ui_loop(AppState& appState, UiState& uiState) {
 
     ImGui::SetNextWindowPos(ImVec2(GetScreenWidth() - 10.0f, 10.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    {
+        Forces fr = solverForces({}, {});
+        ImGui::SetWindowFontScale(1.4f);
+        ImGui::Text("Drag coefficient (Cd): %.3f", fr.cd);
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::Text("Lift (Cl): %.3f   Side (Cz): %.3f", fr.cl, fr.cz);
+        float hist[400];
+        int n = solverDragHistory(hist, 400);
+        if (n > 1 && ImPlot::BeginPlot("##cd", ImVec2(260, 60), ImPlotFlags_CanvasOnly | ImPlotFlags_NoInputs)) {
+            ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
+            ImPlot::SetupAxisLimits(ImAxis_X1, 0, 399, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 3, ImGuiCond_Once);
+            ImPlot::PlotLine("Cd", hist, n);
+            ImPlot::EndPlot();
+        }
+        ImGui::Separator();
+    }
     // only rebuild once the slider is let go, re-voxelizing restarts the flow
     const char *axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
     for (int i = 0; i < 3; ++i) {

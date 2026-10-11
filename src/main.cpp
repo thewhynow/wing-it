@@ -10,6 +10,8 @@
 #include "ui.hpp"
 #include "geometry.hpp"
 #include "solver.hpp"
+#include "multiplayer.hpp"
+#include "title.hpp"
 
 ImFont* bodyFont = nullptr;
 
@@ -20,6 +22,7 @@ int main() {
 
     InitWindow(appState->window.width, appState->window.height, "kill me :)");
     rlImGuiSetup(true);
+    titleInit();
 
     std::atomic<bool> threadRunning{true};
     std::thread timerThread(time_thread, std::ref(*appState), std::ref(threadRunning));
@@ -67,7 +70,7 @@ int main() {
         solverRunning = true;
         solverThread = std::thread([&] {
             while (solverRunning)
-                solverStep(cameraState->grid, uiState->params);
+                { solverStep(cameraState->grid, uiState->params); mpAfterStep(); }
         });
     };
     auto stopSolver = [&] {
@@ -80,7 +83,7 @@ int main() {
         BeginDrawing();
         ClearBackground(BLACK);
         key_loop(*appState, *uiState);
-        if (appState->screen == APP_SCREEN_UI) {
+        if (appState->screen == APP_SCREEN_UI || appState->screen == APP_SCREEN_MP_BATTLE) {
             camera_loop(*appState, *cameraState);
             voxel_loop(*appState, *cameraState, *uiState);
         }
@@ -88,7 +91,7 @@ int main() {
         EndDrawing();
 
         // no point simulating behind the menus
-        if (appState->screen != APP_SCREEN_UI && solverRunning)
+        if (appState->screen != APP_SCREEN_UI && appState->screen != APP_SCREEN_MP_BATTLE && solverRunning)
             stopSolver();
 
         if (uiState->modelChosen) {
@@ -106,6 +109,21 @@ int main() {
             }
         }
 
+        // multiplayer battle: fixed conditions, local model, see multiplayer.hpp
+        if (MpSimRequest req; mpTakeSimRequest(req)) {
+            stopSolver();
+            if (loadMesh("./assets/models/" + req.model, rawMesh)) {
+                uiState->params = SimParams{mp::kInletU, mp::kInletRho, mp::kTau, mp::kAoaDeg};
+                uiState->gridSize = mp::kGridSize;
+                uiState->rotation = req.rotation;
+                buildModel();
+                mpSimBegin((int)(rawMesh.indices.size() / 3)); // raw, pre-rotation mesh
+                startSolver();
+            } else {
+                mpSimFailed("couldn't load " + req.model);
+            }
+        }
+
         // the solver reads the grid every step, so it has to be stopped while the model changes
         if (uiState->modelChanged) {
             uiState->modelChanged = false;
@@ -115,6 +133,7 @@ int main() {
         }
     }
 
+    mpShutdown();
     threadRunning = false;
     timerThread.join();
     stopSolver();
@@ -123,6 +142,7 @@ int main() {
     rlImGuiShutdown();
     delete appState, delete uiState;
 
+    titleShutdown();
     CloseWindow();
 }
 

@@ -8,6 +8,11 @@ enum AppScreen {
     APP_SCREEN_WELCOME,
     APP_SCREEN_SELECT_MODEL,
     APP_SCREEN_UI,
+    // 2-player battle mode (src/ui/multiplayer.cpp)
+    APP_SCREEN_MP_LOBBY,
+    APP_SCREEN_MP_PICK,
+    APP_SCREEN_MP_BATTLE,
+    APP_SCREEN_MP_RESULT,
 };
 
 struct AppState {

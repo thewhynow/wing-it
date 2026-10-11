@@ -223,7 +223,7 @@ void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState
     static std::vector<Vector3> velTarget, velShown;
     static float lo = 1, hi = 1, loShown = 1, hiShown = 1;
     static int framesSinceSample = 1 << 30;
-    if (++framesSinceSample >= 30) {
+    if (++framesSinceSample >= 2) {
         framesSinceSample = 0;
         solverSnapshot(out);
         if (!out.ux.empty()) {

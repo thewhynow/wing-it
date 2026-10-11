@@ -1,5 +1,7 @@
 #include "solver.hpp"
 #include <algorithm>
+#include <cmath>
+#include <deque>
 #include <mutex>
 
 constexpr int cx[19] = { 0, 1, -1, 0, 0, 0, 0, 1, 1, -1, -1, 1, 1, -1, -1, 0, 0, 0, 0 };
@@ -13,6 +15,75 @@ std::mutex solverMutex;
 std::vector<float> f_in;
 std::vector<float> f_out;
 size_t totalCells = 0;
+
+// ---- drag bookkeeping. Links are (fluid cell, direction j pointing away from a solid neighbour) pairs. ----
+// collideStream bounces the outgoing post-collision population f_post_i (i points into the solid) into slot
+// opp[i]=j of the same fluid cell, and nothing else writes that slot, so after the swap f_in[j*N+idx] == f_post_i.
+// Momentum exchange for a link is c_i*(f_post_i + f_reflected) = 2*c_i*f_post_i = -2*c_j*f_in[j*N+idx].
+struct DragLink { uint32_t idx; uint8_t dir; };
+static std::vector<DragLink> dragLinks;
+static float frontalAreaCached = 0.f;
+static std::mutex dragMutex;
+static Forces dragSmoothed{glm::vec3(0.f), 0.f, 0.f, 0.f, 0.f};
+static long long dragSamples = 0;
+static long long dragSteps = 0;
+static std::deque<float> dragHistory;
+constexpr float DRAG_ALPHA = 0.02f;      // EMA weight once warmed up (bias-corrected running mean before that)
+constexpr int   DRAG_HISTORY_EVERY = 25; // steps between history samples
+constexpr size_t DRAG_HISTORY_MAX = 400;
+
+static void buildDragLinks(const Grid& grid) {
+	dragLinks.clear();
+	const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+	for (int z = 0; z < nz; z++) for (int y = 0; y < ny; y++) for (int x = 0; x < nx; x++) {
+		size_t idx = ((size_t)z * ny + y) * nx + x;
+		if (grid.solid[idx]) continue;
+		for (int j = 1; j < 19; j++) {
+			int xs = x - cx[j]; // solid neighbour sits in direction opp[j]
+			if (xs < 0 || xs >= nx) continue;
+			int ys = (y - cy[j] + ny) % ny, zs = (z - cz[j] + nz) % nz;
+			if (grid.solid[((size_t)zs * ny + ys) * nx + xs]) dragLinks.push_back({(uint32_t)idx, (uint8_t)j});
+		}
+	}
+	frontalAreaCached = calculateFrontalArea(grid);
+}
+
+void solverResetDragAverage() {
+	std::lock_guard<std::mutex> lock(dragMutex);
+	dragSmoothed = Forces{glm::vec3(0.f), 0.f, 0.f, 0.f, frontalAreaCached};
+	dragSamples = 0;
+	dragSteps = 0;
+	dragHistory.clear();
+}
+
+// runs on the thread that calls solverStep, right after the swap, so f_in is stable
+static void accumulateDrag(const SimParams& params) {
+	const size_t N = totalCells;
+	glm::vec3 F(0.f);
+	for (const DragLink& l : dragLinks) {
+		float v = 2.f * f_in[l.dir * N + l.idx];
+		F.x -= cx[l.dir] * v;
+		F.y -= cy[l.dir] * v;
+		F.z -= cz[l.dir] * v;
+	}
+	const float A = frontalAreaCached;
+	const float q = params.inletRho * params.inletU * params.inletU * A;
+	if (!(A > 0.f) || !(q > 0.f) || !std::isfinite(F.x + F.y + F.z)) return;
+	const float k = 2.f / q;
+
+	std::lock_guard<std::mutex> lock(dragMutex);
+	float a = std::max(DRAG_ALPHA, 1.f / (float)(dragSamples + 1));
+	dragSamples++;
+	dragSmoothed.F += (F - dragSmoothed.F) * a;
+	dragSmoothed.cd += (F.x * k - dragSmoothed.cd) * a;
+	dragSmoothed.cl += (F.y * k - dragSmoothed.cl) * a;
+	dragSmoothed.cz += (F.z * k - dragSmoothed.cz) * a;
+	dragSmoothed.frontalArea = A;
+	if (++dragSteps % DRAG_HISTORY_EVERY == 0) {
+		dragHistory.push_back(dragSmoothed.cd);
+		if (dragHistory.size() > DRAG_HISTORY_MAX) dragHistory.pop_front();
+	}
+}
 
 void solverReset(const Grid& grid, const SimParams& params) {
 	totalCells = (size_t)grid.nx * grid.ny * grid.nz;
@@ -31,6 +102,10 @@ void solverReset(const Grid& grid, const SimParams& params) {
 		std::fill_n(f_in.begin() + i * totalCells, totalCells, feq);
 		std::fill_n(f_out.begin() + i * totalCells, totalCells, feq);
 	}
+
+	if (grid.solid.size() == totalCells) buildDragLinks(grid);
+	else { dragLinks.clear(); frontalAreaCached = 0.f; }
+	solverResetDragAverage();
 };
 
 // collide one fluid cell and push its populations to the neighbours. Checked handles solids and the x ends;
@@ -142,8 +217,11 @@ void solverStep(const Grid& grid, const SimParams& params) {
 	}
 
 	// snapshot reads f_in from the render thread, so only the swap needs the lock
-	std::lock_guard<std::mutex> lock(solverMutex);
-	std::swap(f_in, f_out);
+	{
+		std::lock_guard<std::mutex> lock(solverMutex);
+		std::swap(f_in, f_out);
+	}
+	accumulateDrag(params);
 };
 
 float calculateFrontalArea(const Grid& grid) {
@@ -162,40 +240,23 @@ float calculateFrontalArea(const Grid& grid) {
 	return area;
 };
 
-Forces solverForces(const Grid& grid, const SimParams& params) { 
-	glm::vec3 F(0.f);
-	for (int z = 0; z < grid.nz; z++) {
-		for (int y = 0; y < grid.ny; y++) {
-			for (int x = 0; x < grid.nx; x++) {
-				int idx = (z * grid.ny + y) * grid.nx + x;
-				if (!grid.solid[idx]) {
-					for (int i = 0; i < 19; i++) {
-						int xn = x + cx[i];
-
-						if (xn < 0 || xn >= grid.nx) continue;
-
-						int yn = (y + (int)cy[i] + grid.ny) % grid.ny;
-						int zn = (z + (int)cz[i] + grid.nz) % grid.nz;
-						size_t neighbor_idx = (zn * grid.ny + yn) * grid.nx + xn;
-						if (grid.solid[neighbor_idx]) {
-							float f_to = f_in[i * totalCells + idx];
-							float f_from = f_in[opp[i] * totalCells + idx];
-							F += glm::vec3(cx[i], cy[i], cz[i]) * (f_to + f_from);
-						}
-					}
-				}
-			}
-		}
-	}
-
-	float frontalArea = calculateFrontalArea(grid);
-
-	float cd = (2 * F.x) / (params.inletRho * params.inletU * params.inletU * frontalArea);
-	float cl = (2 * F.y) / (params.inletRho * params.inletU * params.inletU * frontalArea);
-	float cz = (2 * F.z) / (params.inletRho * params.inletU * params.inletU * frontalArea);
-
-	return Forces{F, cd, cl, cz, frontalArea};
+// latest smoothed forces (lattice units). cd/cl/cz are normalised by 0.5*rho*U^2*frontalArea
+Forces solverForces(const Grid&, const SimParams&) {
+	std::lock_guard<std::mutex> lock(dragMutex);
+	return dragSmoothed;
 };
+
+float solverDragCoefficient() {
+	std::lock_guard<std::mutex> lock(dragMutex);
+	return dragSmoothed.cd;
+}
+
+int solverDragHistory(float* out, int maxCount) {
+	std::lock_guard<std::mutex> lock(dragMutex);
+	int n = std::min<int>((int)dragHistory.size(), maxCount);
+	std::copy(dragHistory.end() - n, dragHistory.end(), out);
+	return n;
+}
 
 void solverSnapshot(FlowField& out) {
 	std::lock_guard<std::mutex> lock(solverMutex);
