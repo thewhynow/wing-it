@@ -4,7 +4,7 @@
 #
 # Requires install() rules and include(CPack) in CMakeLists.txt for the packaging step.
 name: CMake on multiple platforms
- 
+
 on:
   push:
     branches: [ "main" ]
@@ -12,22 +12,22 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:          # run manually from the Actions tab
- 
+
 permissions:
   contents: read
- 
+
 env:
   BUILD_TYPE: Release
- 
+
 jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
- 
+
     strategy:
       # Report results for every configuration even if one fails.
       fail-fast: false
- 
+
       # Same three builds as the starter workflow, listed explicitly.
       # "package: true" marks which builds get attached to a release.
       # Only one Linux build is packaged: GCC and Clang would both produce
@@ -51,29 +51,40 @@ jobs:
             c_compiler: clang
             cpp_compiler: clang++
             package: false
- 
+
     steps:
       - uses: actions/checkout@v6
- 
+
+      # raylib builds GLFW from source, which needs the X11 / OpenGL development
+      # headers. GitHub's Ubuntu runners don't include them.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev \
+            libwayland-dev libxkbcommon-dev
+
       - name: Configure CMake
         run: >
           cmake -S . -B build
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
- 
+
       # Your build command, plus --config so Windows (Visual Studio generator,
       # multi-config) builds Release instead of its default Debug.
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j
- 
+
       - name: Test
         run: ctest --test-dir build --build-config ${{ env.BUILD_TYPE }} --output-on-failure
- 
+
       - name: Package
         if: matrix.package
         run: cpack --config build/CPackConfig.cmake -C ${{ env.BUILD_TYPE }} -G ${{ matrix.cpack_generator }} -B dist
- 
+
       - name: Upload package
         if: matrix.package
         uses: actions/upload-artifact@v7
@@ -83,7 +94,7 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
           if-no-files-found: error
- 
+
   release:
     name: Publish GitHub Release
     needs: build                                   # only if every build passed
@@ -98,7 +109,7 @@ jobs:
           pattern: package-*
           path: dist
           merge-multiple: true
- 
+
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
