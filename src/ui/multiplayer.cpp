@@ -8,6 +8,7 @@
 #include "solver.hpp"
 #include "ui.hpp"
 #include "models.hpp"
+#include "model_library.hpp"
 
 namespace {
 
@@ -16,7 +17,7 @@ mp::Match match;
 // --- UI-only state ---
 char nameBuf[32] = "";
 char ipBuf[64] = "127.0.0.1";
-int pickIdx = 0;
+std::string pickId;   // local model ID (a path). only modelLabel(pickId) goes over the wire (match.myModel)
 glm::vec3 pickRot{0.0f};
 bool lobbyInit = false;
 
@@ -131,14 +132,10 @@ void drawPick(AppState& app, UiState& ui) {
     ImGui::Separator();
 
     ImGui::BeginDisabled(match.myReady);
-    if (ImGui::BeginListBox("##mpmodels", ImVec2(-FLT_MIN, 150))) {
-        for (int i = 0; i < (int)ui.models.size(); ++i)
-            if (ImGui::Selectable(modelLabel(ui.models[i]).c_str(), pickIdx == i) && pickIdx != i) {
-                pickIdx = i;
-                match.setPick(ui.models[i]);
-            }
-        ImGui::EndListBox();
-    }
+    if (modelIndexOf(ui, pickId) < 0) pickId = ui.models.empty() ? "" : ui.models[0];
+    bool picked = modelLibraryList("##mpmodels", ui, pickId, ImVec2(-FLT_MIN, 200));
+    picked |= modelLibraryControls(ui, pickId, !match.myReady); // add file / drag-and-drop / phone upload
+    if (picked) match.setPick(modelLabel(pickId));
     const char* axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
     for (int i = 0; i < 3; ++i)
         ImGui::SliderFloat(axes[i], &pickRot[i], -180.0f, 180.0f, "%.0f deg");
@@ -151,9 +148,9 @@ void drawPick(AppState& app, UiState& ui) {
     if (match.myReady) {
         ImGui::TextColored(kGreen, "Ready - waiting for %s...", match.peer.name.c_str());
     } else {
-        ImGui::BeginDisabled(ui.models.empty());
+        ImGui::BeginDisabled(pickId.empty());
         if (ImGui::Button("Ready", ImVec2(-FLT_MIN, 0))) {
-            match.setPick(ui.models[pickIdx]);
+            match.setPick(modelLabel(pickId));
             match.setReady();
         }
         ImGui::EndDisabled();
@@ -362,7 +359,7 @@ void mpEnter(AppState& app) {
     match.leave();
     resetSimFlags();
     reqPending = false;
-    pickIdx = 0;
+    pickId.clear();
     pickRot = glm::vec3(0.0f);
     app.screen = APP_SCREEN_MP_LOBBY;
 }
@@ -379,15 +376,15 @@ void mpDrawUi(AppState& app, UiState& ui) {
         case mp::Match::Pick:
             if (app.screen != APP_SCREEN_MP_PICK) {
                 app.screen = APP_SCREEN_MP_PICK;
-                pickIdx = std::min(pickIdx, std::max(0, (int)ui.models.size() - 1));
-                if (!ui.models.empty()) match.setPick(ui.models[pickIdx]);
+                if (modelIndexOf(ui, pickId) < 0) pickId = ui.models.empty() ? "" : ui.models[0];
+                if (!pickId.empty()) match.setPick(modelLabel(pickId));
             }
             break;
         case mp::Match::Battle: app.screen = match.myHalftime ? APP_SCREEN_MP_HALFTIME : APP_SCREEN_MP_BATTLE; break;
         case mp::Match::Result: app.screen = APP_SCREEN_MP_RESULT; break;
     }
-    if (match.takeStart() && !ui.models.empty()) {
-        pendingReq = {match.myModel, pickRot};
+    if (match.takeStart() && !pickId.empty()) {
+        pendingReq = {pickId, pickRot}; // local ID; match.myModel is only the display label
         reqPending = true;
         resetSimFlags(); simSteps = 0; lastSentPct = -1; lastCdSend = -100.0;
         curRot = htRot = lastRotSent = pickRot;

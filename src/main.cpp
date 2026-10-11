@@ -123,8 +123,9 @@ int main() {
 
         if (uiState->modelChosen) {
             uiState->modelChosen = false;
-            const std::string &name = uiState->models[uiState->model];
-            if (loadMesh(name, rawMesh)) {
+            const std::string name = uiState->models.empty() ? "" : uiState->models[uiState->model];
+            std::string why;
+            if (!name.empty() && loadMesh(name, rawMesh, &why)) {
                 uiState->modelError.clear();
                 uiState->rotation = glm::vec3(0.0f);
                 uiState->params.aoaDeg = 0.0f;
@@ -133,14 +134,15 @@ int main() {
                 startSolver();
                 appState->screen = APP_SCREEN_UI;
             } else {
-                uiState->modelError = "couldn't load " + name + " (over 65535 verts?)";
+                uiState->modelError = "Couldn't load " + modelLabel(name) + ": " + (why.empty() ? "no model selected" : why);
             }
         }
 
         // multiplayer battle: fixed conditions, local model, see multiplayer.hpp
         if (MpSimRequest req; mpTakeSimRequest(req)) {
             stopSolver();
-            if (loadMesh(req.model, rawMesh)) {
+            std::string why;
+            if (loadMesh(req.model, rawMesh, &why)) {
                 uiState->params = SimParams{mp::kInletU, mp::kInletRho, mp::kTau, mp::kAoaDeg};
                 uiState->gridSize = mp::kGridSize;
                 uiState->rotation = req.rotation;
@@ -149,7 +151,7 @@ int main() {
                 mpSimBegin((int)(rawMesh.indices.size() / 3)); // raw, pre-rotation mesh
                 startSolver();
             } else {
-                mpSimFailed("couldn't load " + req.model);
+                mpSimFailed("couldn't load " + modelLabel(req.model) + ": " + why);
             }
         }
 
