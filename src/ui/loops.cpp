@@ -9,6 +9,7 @@
 #include "raylib.h"
 #include "ui.hpp"
 #include "title.hpp"
+#include "models.hpp"
 #include "solver.hpp"
 #include <implot.h>
 #include "multiplayer.hpp"
@@ -78,7 +79,7 @@ void ui_loop(AppState& appState, UiState& uiState) {
 
         if (ImGui::BeginListBox("##models", ImVec2(260, 0))) {
             for (int i = 0; i < (int)uiState.models.size(); ++i)
-                if (ImGui::Selectable(uiState.models[i].c_str(), uiState.model == i, ImGuiSelectableFlags_AllowDoubleClick)
+                if (ImGui::Selectable(modelLabel(uiState.models[i]).c_str(), uiState.model == i, ImGuiSelectableFlags_AllowDoubleClick)
                     && (uiState.model = i, ImGui::IsMouseDoubleClicked(0)))
                     uiState.modelChosen = true;
             ImGui::EndListBox();

@@ -13,6 +13,7 @@
 #include "multiplayer.hpp"
 #include "title.hpp"
 #include "server.hpp"
+#include "models.hpp"
 
 ImFont* bodyFont = nullptr;
 
@@ -40,10 +41,9 @@ int main() {
     ImPlot::CreateContext();
     printf("got here! grid.nx: %d, grid.ny: %d\n", cameraState->grid.nx, cameraState->grid.ny);
 
-    for (const auto &entry : std::filesystem::directory_iterator("./assets/models"))
-        if (entry.path().extension() == ".obj")
-            uiState->models.push_back(entry.path().filename().string());
-    std::sort(uiState->models.begin(), uiState->models.end());
+    // uiState->models holds model IDs (paths, see models.hpp); show modelLabel(id) in the UI
+    modelsRefresh();
+    for (const auto &m : modelsList()) uiState->models.push_back(m.id);
 
     TriMesh rawMesh;
 
@@ -99,7 +99,7 @@ int main() {
         if (uiState->modelChosen) {
             uiState->modelChosen = false;
             const std::string &name = uiState->models[uiState->model];
-            if (loadMesh("./assets/models/" + name, rawMesh)) {
+            if (loadMesh(name, rawMesh)) {
                 uiState->modelError.clear();
                 uiState->rotation = glm::vec3(0.0f);
                 uiState->params.aoaDeg = 0.0f;
@@ -114,7 +114,7 @@ int main() {
         // multiplayer battle: fixed conditions, local model, see multiplayer.hpp
         if (MpSimRequest req; mpTakeSimRequest(req)) {
             stopSolver();
-            if (loadMesh("./assets/models/" + req.model, rawMesh)) {
+            if (loadMesh(req.model, rawMesh)) {
                 uiState->params = SimParams{mp::kInletU, mp::kInletRho, mp::kTau, mp::kAoaDeg};
                 uiState->gridSize = mp::kGridSize;
                 uiState->rotation = req.rotation;

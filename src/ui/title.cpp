@@ -1,4 +1,5 @@
 #include "title.hpp"
+#include "models.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -156,7 +157,7 @@ void titleInit() {
 
     std::vector<std::pair<std::string, uintmax_t>> files;
     std::error_code ec;
-    for (const auto &e : std::filesystem::directory_iterator("./assets/models", ec)) {
+    for (const auto &e : std::filesystem::directory_iterator(kSampleDir, ec)) {
         if (e.path().extension() != ".obj") continue;
         uintmax_t sz = e.file_size(ec);
         bool dup = false;

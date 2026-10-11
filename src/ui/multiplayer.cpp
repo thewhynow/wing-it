@@ -6,6 +6,7 @@
 #include "multiplayer.hpp"
 #include "solver.hpp"
 #include "ui.hpp"
+#include "models.hpp"
 
 namespace {
 
@@ -107,7 +108,7 @@ void drawPick(AppState& app, UiState& ui) {
     ImGui::BeginDisabled(match.myReady);
     if (ImGui::BeginListBox("##mpmodels", ImVec2(-FLT_MIN, 150))) {
         for (int i = 0; i < (int)ui.models.size(); ++i)
-            if (ImGui::Selectable(ui.models[i].c_str(), pickIdx == i) && pickIdx != i) {
+            if (ImGui::Selectable(modelLabel(ui.models[i]).c_str(), pickIdx == i) && pickIdx != i) {
                 pickIdx = i;
                 match.setPick(ui.models[i]);
             }
