@@ -4,6 +4,7 @@
 #include "raylib.h"
 
 struct AppState;
+struct UiState;
 
 // "shown" eases toward the latest trace every frame so lines don't jump between retraces
 struct Streamline {
@@ -34,4 +35,4 @@ void renderFrame(const FlowField& field, const Forces& forces, float slicePos);
 void renderShutdown();
 
 void camera_loop(AppState& appState, Render3DState& cameraState);
-void voxel_loop(AppState& appState, Render3DState& cameraState);
+void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState);

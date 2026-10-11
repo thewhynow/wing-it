@@ -73,6 +73,19 @@ void ui_loop(AppState& appState, UiState& uiState) {
 
     ImGui::End();
 
+    ImGui::SetNextWindowPos(ImVec2(GetScreenWidth() - 10.0f, 10.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    // only rebuild once the slider is let go, re-voxelizing restarts the flow
+    const char *axes[] = {"Rotate X", "Rotate Y", "Rotate Z"};
+    for (int i = 0; i < 3; ++i) {
+        ImGui::SliderFloat(axes[i], &uiState.rotation[i], -180.0f, 180.0f, "%.0f deg");
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            uiState.rotationChanged = true;
+    }
+    ImGui::Checkbox("Pressure colours", &uiState.showColors);
+    ImGui::Checkbox("Streamlines", &uiState.showLines);
+    ImGui::End();
+
     rlImGuiEnd();
 
 }

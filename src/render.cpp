@@ -1,4 +1,5 @@
 #include "raylib.h"
+#include <imgui.h>
 #include "raymath.h"
 #include "rlgl.h"
 #include "solver.hpp"
@@ -15,7 +16,7 @@
 
 void camera_loop(AppState& appState, Render3DState& cameraState) {
     // --- update (before drawing) ---
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !ImGui::GetIO().WantCaptureMouse) { // not while dragging a slider
         Vector2 d = GetMouseDelta();
         cameraState.yaw -= d.x * 0.005f;
         cameraState.pitch += d.y * 0.005f;
@@ -62,91 +63,92 @@ static void sampleFlow(const FlowField &f, const Grid &g, Vector3 p, Vector3 &ve
     rho = rhoW > 0.0f ? rho / rhoW : 1.0f;
 }
 
-void voxel_loop(AppState& appState, Render3DState& cameraState) {
-    Grid &g = cameraState.grid;
-    auto &lines = cameraState.lines;
+static std::vector<Vector3> surfPos, surfNormal; // mesh verts in grid coords, for sampling the flow there
+static float sliceY = 0.5f; // the floor slice sits just under the model
 
-    // the solver is always running, so retrace every streamline from a fresh snapshot a few times a second
-    static FlowField out; // static so the snapshot buffers aren't reallocated every frame
-    static int framesSinceTrace = 1 << 30;
-    if (++framesSinceTrace >= 30) {
-        framesSinceTrace = 0;
-        solverSnapshot(out);
+// blue -> cyan -> green -> yellow -> red
+static Color jet(float t) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    auto ch = [&](float c) { return (unsigned char)(255 * std::clamp(1.5f - fabsf(4.0f * t - c), 0.0f, 1.0f)); };
+    return {ch(3), ch(2), ch(1), 255};
+}
 
-        const float step = 0.5f; // in cells
-        const int maxSteps = 4 * (g.nx + g.ny + g.nz);
-        std::vector<std::vector<float>> rhos;
-        float rhoMin = 1e30f, rhoMax = -1e30f;
+// trace a streamline from every seed on the inlet face, widths ramp with pressure
+static void traceLines(const FlowField &out, const Grid &g, std::vector<Streamline> &lines) {
+    const float step = 0.5f; // in cells
+    const int maxSteps = 4 * (g.nx + g.ny + g.nz);
+    std::vector<std::vector<float>> rhos;
+    float rhoMin = 1e30f, rhoMax = -1e30f;
 
-        size_t l = 0;
-        for (int sz = 1; sz < g.nz && !out.ux.empty(); sz += 3) {
-            for (int sy = 1; sy < g.ny; sy += 3, ++l) {
-                if (lines.size() <= l)
-                    lines.emplace_back();
-                Streamline &sl = lines[l];
+    size_t l = 0;
+    for (int sz = 1; sz < g.nz; sz += 3) {
+        for (int sy = 1; sy < g.ny; sy += 3, ++l) {
+            if (lines.size() <= l)
+                lines.emplace_back();
+            Streamline &sl = lines[l];
 
-                Vector3 p = {0.5f, (float)sy, (float)sz};
-                Vector3 freeVel;
-                float r;
-                sampleFlow(out, g, p, freeVel, r);
+            Vector3 p = {0.5f, (float)sy, (float)sz};
+            Vector3 freeVel;
+            float r;
+            sampleFlow(out, g, p, freeVel, r);
 
-                sl.target.clear();
-                rhos.emplace_back();
-                bool interesting = false;
+            sl.target.clear();
+            rhos.emplace_back();
+            bool interesting = false;
 
-                for (int s = 0; s < maxSteps; ++s) {
-                    Vector3 vel;
-                    sampleFlow(out, g, p, vel, r);
-                    sl.target.push_back(p);
-                    rhos.back().push_back(r);
+            for (int s = 0; s < maxSteps; ++s) {
+                Vector3 vel;
+                sampleFlow(out, g, p, vel, r);
+                sl.target.push_back(p);
+                rhos.back().push_back(r);
 
-                    // only keep lines that get bent or sped up / slowed down by the model
-                    if (Vector3Distance(vel, freeVel) > 0.1f * Vector3Length(freeVel))
-                        interesting = true;
+                // only keep lines that get bent or sped up / slowed down by the model
+                if (Vector3Distance(vel, freeVel) > 0.1f * Vector3Length(freeVel))
+                    interesting = true;
 
-                    float speed = Vector3Length(vel);
-                    if (speed < 1e-6f)
-                        break;
-                    p = Vector3Add(p, Vector3Scale(vel, step / speed)); // fixed step along the flow
+                float speed = Vector3Length(vel);
+                if (speed < 1e-6f)
+                    break;
+                p = Vector3Add(p, Vector3Scale(vel, step / speed)); // fixed step along the flow
 
-                    int x = (int)floorf(p.x), y = (int)floorf(p.y), z = (int)floorf(p.z);
-                    if (x < 0 || x >= g.nx || y < 0 || y >= g.ny || z < 0 || z >= g.nz)
-                        break;
-                    if (!g.solid.empty() && g.solid[FlowField::cellIndex(g, x, y, z)]) {
-                        interesting = true;
-                        break;
-                    }
+                int x = (int)floorf(p.x), y = (int)floorf(p.y), z = (int)floorf(p.z);
+                if (x < 0 || x >= g.nx || y < 0 || y >= g.ny || z < 0 || z >= g.nz)
+                    break;
+                if (!g.solid.empty() && g.solid[FlowField::cellIndex(g, x, y, z)]) {
+                    interesting = true;
+                    break;
                 }
-
-                sl.targetPresence = interesting && sl.target.size() > 1 ? 1.0f : 0.0f;
-                if (sl.targetPresence > 0.0f)
-                    for (float v : rhos.back()) {
-                        rhoMin = std::min(rhoMin, v);
-                        rhoMax = std::max(rhoMax, v);
-                    }
-            }
-        }
-
-        // pressure is rho / 3 in LBM, so normalizing rho gives the same thin -> thick ramp
-        float range = rhoMax - rhoMin;
-        for (size_t i = 0; i < rhos.size(); ++i) {
-            Streamline &sl = lines[i];
-            sl.targetWidth.resize(rhos[i].size());
-            for (size_t p = 0; p < rhos[i].size(); ++p) {
-                float t = range > 1e-9f ? std::clamp((rhos[i][p] - rhoMin) / range, 0.0f, 1.0f) : 0.0f;
-                sl.targetWidth[p] = 0.15f + 1.1f * t;
             }
 
-            // a brand new line starts on its target and just fades in
-            if (sl.shown.empty()) {
-                sl.shown = sl.target;
-                sl.shownWidth = sl.targetWidth;
-            }
+            sl.targetPresence = interesting && sl.target.size() > 1 ? 1.0f : 0.0f;
+            if (sl.targetPresence > 0.0f)
+                for (float v : rhos.back()) {
+                    rhoMin = std::min(rhoMin, v);
+                    rhoMax = std::max(rhoMax, v);
+                }
         }
     }
 
-    // ease shown toward target. a target that got shorter is padded with its end point so the tail pulls in
-    float ease = 1.0f - expf(-6.0f * GetFrameTime());
+    float range = rhoMax - rhoMin;
+    for (size_t i = 0; i < rhos.size(); ++i) {
+        Streamline &sl = lines[i];
+        sl.targetWidth.resize(rhos[i].size());
+        for (size_t p = 0; p < rhos[i].size(); ++p) {
+            float t = range > 1e-9f ? std::clamp((rhos[i][p] - rhoMin) / range, 0.0f, 1.0f) : 0.0f;
+            sl.targetWidth[p] = 0.05f + 0.35f * t;
+        }
+
+        // a brand new line starts on its target and just fades in
+        if (sl.shown.empty()) {
+            sl.shown = sl.target;
+            sl.shownWidth = sl.targetWidth;
+        }
+    }
+}
+
+// ease shown toward target. a target that got shorter is padded with its end point so the tail pulls in
+static void easeLines(std::vector<Streamline> &lines, float dt) {
+    float ease = 1.0f - expf(-6.0f * dt);
     for (Streamline &sl : lines) {
         if (sl.target.empty())
             continue;
@@ -171,16 +173,15 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
             sl.shownWidth.pop_back();
         }
     }
+}
 
-    BeginMode3D(cameraState.camera);
-
-    // ribbons that always face the camera, since GL lines can't be thicker than 1px on macOS
-    Vector3 off = {-(float)(g.nx/2), -(float)(g.ny/2), -(float)(g.nz/2)}; // same offset the model gets
-    Vector3 cam = cameraState.camera.position;
+// ribbons that always face the camera, since GL lines can't be thicker than 1px on macOS
+static void drawLines(const std::vector<Streamline> &lines, Vector3 off, Vector3 cam) {
     rlDrawRenderBatchActive();
     rlDisableBackfaceCulling();
+    rlDisableDepthMask(); // see-through, so overlapping lines shouldn't hide each other
     rlBegin(RL_TRIANGLES);
-    rlColor4ub(SKYBLUE.r, SKYBLUE.g, SKYBLUE.b, 255);
+    rlColor4ub(SKYBLUE.r, SKYBLUE.g, SKYBLUE.b, 110);
     for (const Streamline &sl : lines) {
         if (sl.presence < 0.01f || sl.shown.size() < 2)
             continue;
@@ -207,11 +208,116 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
     }
     rlEnd();
     rlDrawRenderBatchActive();
+    rlEnableDepthMask();
     rlEnableBackfaceCulling();
+}
 
-    // mesh is in grid coords (0..n), the lines are centered on the origin
+void voxel_loop(AppState& appState, Render3DState& cameraState, UiState& uiState) {
+    Grid &g = cameraState.grid;
+    size_t nSurf = surfPos.size(), nSlice = (size_t)g.nx * g.nz;
+
+    // sample surface verts then slice cells a few times a second, "shown" eases toward it so nothing pops
+    static FlowField out;
+    static std::vector<float> rhoTarget, rhoShown;
+    static std::vector<Vector3> velTarget, velShown;
+    static float lo = 1, hi = 1, loShown = 1, hiShown = 1;
+    static int framesSinceSample = 1 << 30;
+    if (++framesSinceSample >= 30) {
+        framesSinceSample = 0;
+        solverSnapshot(out);
+        if (!out.ux.empty()) {
+            rhoTarget.resize(nSurf + nSlice);
+            velTarget.resize(nSurf + nSlice);
+            for (size_t i = 0; i < nSurf; ++i) // a cell out along the normal so it reads fluid, not the voxels
+                sampleFlow(out, g, Vector3Add(surfPos[i], surfNormal[i]), velTarget[i], rhoTarget[i]);
+            for (int z = 0; z < g.nz; ++z)
+                for (int x = 0; x < g.nx; ++x) {
+                    size_t i = nSurf + x + (size_t)g.nx * z;
+                    sampleFlow(out, g, {x + 0.5f, sliceY, z + 0.5f}, velTarget[i], rhoTarget[i]);
+                }
+
+            auto [mn, mx] = std::minmax_element(rhoTarget.begin(), rhoTarget.end());
+            lo = *mn, hi = *mx;
+            if (rhoShown.size() != rhoTarget.size()) {
+                rhoShown = rhoTarget, velShown = velTarget;
+                loShown = lo, hiShown = hi;
+            }
+        }
+        if (uiState.showLines && !out.ux.empty())
+            traceLines(out, g, cameraState.lines);
+    }
+
+    float ease = 1.0f - expf(-4.0f * GetFrameTime());
+    for (size_t i = 0; i < rhoShown.size(); ++i) {
+        rhoShown[i] += (rhoTarget[i] - rhoShown[i]) * ease;
+        velShown[i] = Vector3Lerp(velShown[i], velTarget[i], ease);
+    }
+    loShown += (lo - loShown) * ease;
+    hiShown += (hi - hiShown) * ease;
+    // pressure is rho / 3 in LBM, so normalizing rho gives the same colour ramp
+    auto shade = [&](size_t i) { return jet((rhoShown[i] - loShown) / std::max(hiShown - loShown, 1e-6f)); };
+    bool haveFlow = !rhoShown.empty();
+
+    if (haveFlow && meshModel.meshCount > 0) {
+        Mesh &m = meshModel.meshes[0];
+        for (size_t i = 0; i < nSurf; ++i) {
+            Color c = uiState.showColors ? shade(i) : WHITE;
+            std::memcpy(m.colors + 4 * i, &c, 4);
+        }
+        UpdateMeshBuffer(m, 3, m.colors, (int)nSurf * 4, 0);
+    }
+
+    if (uiState.showLines)
+        easeLines(cameraState.lines, GetFrameTime());
+
+    BeginMode3D(cameraState.camera);
+    Vector3 off = {-(float)(g.nx/2), -(float)(g.ny/2), -(float)(g.nz/2)}; // mesh is in grid coords, the scene is centered
+
+    // floor slice, corners at cell centres so the colours blend
+    if (haveFlow) {
+        rlDrawRenderBatchActive();
+        rlDisableBackfaceCulling();
+        rlBegin(RL_TRIANGLES);
+        auto vert = [&](int x, int z) {
+            Color c = shade(nSurf + x + (size_t)g.nx * z);
+            rlColor4ub(c.r, c.g, c.b, 255);
+            rlVertex3f(x + 0.5f + off.x, sliceY + off.y, z + 0.5f + off.z);
+        };
+        for (int z = 0; z + 1 < g.nz; ++z)
+            for (int x = 0; x + 1 < g.nx; ++x) {
+                vert(x, z); vert(x + 1, z); vert(x + 1, z + 1);
+                vert(x, z); vert(x + 1, z + 1); vert(x, z + 1);
+            }
+        rlEnd();
+        rlDrawRenderBatchActive();
+        rlEnableBackfaceCulling();
+    }
+
     if (meshModel.meshCount > 0)
-        DrawModel(meshModel, {-(float)(g.nx/2), -(float)(g.ny/2), -(float)(g.nz/2)}, 1.0f, WHITE);
+        DrawModel(meshModel, off, 1.0f, WHITE);
+
+    if (uiState.showLines) // after the model since they're see-through
+        drawLines(cameraState.lines, off, cameraState.camera.position);
+
+    // short black dashes along the flow, like a hedgehog plot
+    if (haveFlow) {
+        rlBegin(RL_LINES);
+        rlColor4ub(0, 0, 0, 255);
+        auto dash = [&](Vector3 base, Vector3 dir, float len) {
+            if (Vector3Length(dir) < 1e-6f)
+                return;
+            Vector3 h = Vector3Scale(Vector3Normalize(dir), 0.5f * len);
+            Vector3 a = Vector3Add(Vector3Subtract(base, h), off), b = Vector3Add(Vector3Add(base, h), off);
+            rlVertex3f(a.x, a.y, a.z);
+            rlVertex3f(b.x, b.y, b.z);
+        };
+        for (int z = 0; z < g.nz; z += 2)
+            for (int x = 0; x < g.nx; x += 2) {
+                Vector3 v = velShown[nSurf + x + (size_t)g.nx * z];
+                dash({x + 0.5f, sliceY + 0.05f, z + 0.5f}, {v.x, 0, v.z}, 1.5f);
+            }
+        rlEnd();
+    }
 
     EndMode3D();
 }
@@ -220,19 +326,21 @@ void voxel_loop(AppState& appState, Render3DState& cameraState) {
 static Shader litShader() {
     static Shader shader = LoadShaderFromMemory(
         "#version 330\n"
-        "in vec3 vertexPosition; in vec3 vertexNormal;\n"
+        "in vec3 vertexPosition; in vec3 vertexNormal; in vec4 vertexColor;\n"
         "uniform mat4 mvp; uniform mat4 matNormal;\n"
-        "out vec3 fragNormal;\n"
+        "out vec3 fragNormal; out vec4 fragColor;\n"
         "void main() {\n"
         "    fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));\n"
+        "    fragColor = vertexColor;\n"
         "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
         "}\n",
         "#version 330\n"
-        "in vec3 fragNormal; uniform vec4 colDiffuse; out vec4 finalColor;\n"
+        "in vec3 fragNormal; in vec4 fragColor; uniform vec4 colDiffuse; out vec4 finalColor;\n"
         "void main() {\n"
         "    vec3 light = normalize(vec3(-0.4, 0.8, 0.5));\n"
         "    float d = max(dot(normalize(fragNormal), light), 0.0);\n"
-        "    finalColor = vec4(colDiffuse.rgb * (0.25 + 0.75 * d), colDiffuse.a);\n"
+        "    vec4 c = colDiffuse * fragColor;\n"
+        "    finalColor = vec4(c.rgb * (0.4 + 0.6 * d), c.a);\n"
         "}\n");
     return shader;
 }
@@ -255,10 +363,24 @@ void renderSetMesh(const TriMesh& mesh){
     rayMesh.normals = (float*) MemAlloc(mesh.normals.size() * sizeof(glm::vec3));
     std::memcpy(rayMesh.normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3));
 
+    // per-vertex pressure colours, rewritten every frame in voxel_loop
+    rayMesh.colors = (unsigned char*) MemAlloc(mesh.vertices.size() * 4);
+    std::memset(rayMesh.colors, 255, mesh.vertices.size() * 4);
+
     rayMesh.triangleCount = mesh.indices.size() / 3;
     rayMesh.vertexCount = mesh.vertices.size();
 
-    UploadMesh(&rayMesh, false); // LoadModelFromMesh doesn't send it to the GPU
+    surfPos.resize(mesh.vertices.size());
+    surfNormal.resize(mesh.vertices.size());
+    float minY = 1e30f;
+    for (size_t i = 0; i < mesh.vertices.size(); ++i) {
+        surfPos[i] = {mesh.vertices[i].x, mesh.vertices[i].y, mesh.vertices[i].z};
+        surfNormal[i] = {mesh.normals[i].x, mesh.normals[i].y, mesh.normals[i].z};
+        minY = std::min(minY, mesh.vertices[i].y);
+    }
+    sliceY = std::max(0.5f, minY - 1.5f);
+
+    UploadMesh(&rayMesh, true); // dynamic so the colours can be updated, LoadModelFromMesh doesn't upload
     meshModel = LoadModelFromMesh(rayMesh);
     meshModel.materials[0].shader = litShader();
 }

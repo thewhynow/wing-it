@@ -4,7 +4,7 @@
 #include <vector>
 #include <glm/glm.hpp>
 
-struct Grid      { int nx = 80, ny = 80, nz = 160;
+struct Grid      { int nx = 160, ny = 80, nz = 80; // wind runs along the long x axis
     std::vector<uint8_t> solid; };      // 1 = obstacle
 struct FlowField {
     std::vector<float> ux, uy, uz, rho;

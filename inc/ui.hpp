@@ -27,6 +27,9 @@ struct UiState {
     int resolution = 1;
     float slicePos = 0.5f;
     bool paused = false, reset = false;
+    glm::vec3 rotation{0.0f}; // model rotation in degrees about x, y, z
+    bool rotationChanged = false; // set when a slider is let go, main re-voxelizes
+    bool showColors = true, showLines = true;
 };
 
 // TODO: create functions to initialise UI ticks
