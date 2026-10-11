@@ -1,0 +1,107 @@
+# Builds and tests on Windows (MSVC) and Linux (GCC + Clang) on every push/PR to main.
+# Pushing a tag that starts with "v" (e.g. v1.0.0) also publishes a GitHub Release
+# with the packaged builds attached.
+#
+# Requires install() rules and include(CPack) in CMakeLists.txt for the packaging step.
+name: CMake on multiple platforms
+ 
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:          # run manually from the Actions tab
+ 
+permissions:
+  contents: read
+ 
+env:
+  BUILD_TYPE: Release
+ 
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+ 
+    strategy:
+      # Report results for every configuration even if one fails.
+      fail-fast: false
+ 
+      # Same three builds as the starter workflow, listed explicitly.
+      # "package: true" marks which builds get attached to a release.
+      # Only one Linux build is packaged: GCC and Clang would both produce
+      # <name>-<version>-Linux.tar.gz and clash on the release page.
+      matrix:
+        include:
+          - name: windows-msvc
+            os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            cpack_generator: ZIP
+            package: true
+          - name: linux-gcc
+            os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            cpack_generator: TGZ
+            package: true
+          - name: linux-clang
+            os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            package: false
+ 
+    steps:
+      - uses: actions/checkout@v6
+ 
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+ 
+      # Your build command, plus --config so Windows (Visual Studio generator,
+      # multi-config) builds Release instead of its default Debug.
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j
+ 
+      - name: Test
+        run: ctest --test-dir build --build-config ${{ env.BUILD_TYPE }} --output-on-failure
+ 
+      - name: Package
+        if: matrix.package
+        run: cpack --config build/CPackConfig.cmake -C ${{ env.BUILD_TYPE }} -G ${{ matrix.cpack_generator }} -B dist
+ 
+      - name: Upload package
+        if: matrix.package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.name }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+ 
+  release:
+    name: Publish GitHub Release
+    needs: build                                   # only if every build passed
+    if: startsWith(github.ref, 'refs/tags/v')      # only on version tags
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+ 
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}   # v1.0.0-beta → pre-release
